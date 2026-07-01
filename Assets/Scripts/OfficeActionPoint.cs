@@ -14,14 +14,14 @@ public class OfficeActionPoint : MonoBehaviour
 {
     public OfficeActionType actionType;
 
-    [Header("Настройки действия")]
+    [Header("Action Settings")]
     public float useTime = 3f;
     public float baseScore = 10f;
 
-    [Tooltip("Сколько агентов могут использовать это одновременно? (например, ChatSpot = 2, WorkDesk = 1)")]
+    [Tooltip("How many agents can use this at the same time? (e.g. ChatSpot = 2, WorkDesk = 1)")]
     public int capacity = 1;
 
-    [Header("Эффекты после использования")]
+    [Header("Effects After Use")]
     public float energyChange = 0f;
     public float focusChange = 0f;
     public float socialChange = 0f;
