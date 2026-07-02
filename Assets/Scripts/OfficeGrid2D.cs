@@ -20,7 +20,14 @@ public class OfficeGrid2D : MonoBehaviour
     [Range(0.1f, 1f)]
     public float obstacleCheckSize = 0.8f;
 
+    [Header("Routing Costs")]
+    [Tooltip("Extra path cost for cells that are only barely wide enough for a worker.")]
+    public float lowClearancePenalty = 4f;
+    [Tooltip("Maximum distance sampled when estimating corridor width.")]
+    public float clearanceProbeDistance = 2f;
+
     private bool[,] walkable;
+    private float[,] clearance;
 
     public bool Ready => walkable != null;
 
@@ -32,6 +39,7 @@ public class OfficeGrid2D : MonoBehaviour
     public void Rebuild()
     {
         walkable = new bool[width, height];
+        clearance = new float[width, height];
 
         for (int x = 0; x < width; x++)
         {
@@ -46,6 +54,9 @@ public class OfficeGrid2D : MonoBehaviour
                 );
 
                 walkable[x, y] = obstacle == null;
+                clearance[x, y] = walkable[x, y]
+                    ? EstimateClearance(worldPosition)
+                    : 0f;
             }
         }
     }
@@ -82,6 +93,108 @@ public class OfficeGrid2D : MonoBehaviour
         return walkable[cell.x, cell.y];
     }
 
+    public float GetClearance(Vector2Int cell)
+    {
+        if (!InBounds(cell) || clearance == null)
+            return 0f;
+
+        return clearance[cell.x, cell.y];
+    }
+
+    public float GetStaticCost(Vector2Int cell, float workerRadius)
+    {
+        if (!IsWalkable(cell))
+            return float.PositiveInfinity;
+
+        float cellClearance = GetClearance(cell);
+        float desiredClearance = workerRadius * 2.6f;
+        if (cellClearance >= desiredClearance)
+            return 0f;
+
+        float t = Mathf.Clamp01((desiredClearance - cellClearance) / Mathf.Max(0.01f, desiredClearance));
+        return t * lowClearancePenalty;
+    }
+
+    public bool IsBodyPositionClear(Vector2 worldPosition, float radius)
+    {
+        Vector2Int cell = WorldToCell(worldPosition);
+        if (!IsWalkable(cell))
+            return false;
+
+        return Physics2D.OverlapCircle(worldPosition, radius, obstacleMask) == null;
+    }
+
+    public bool CanMoveBody(Vector2 from, Vector2 to, float radius)
+    {
+        Vector2 delta = to - from;
+        float dist = delta.magnitude;
+
+        if (dist <= 0.0001f)
+            return IsBodyPositionClear(to, radius);
+
+        RaycastHit2D hit = Physics2D.CircleCast(from, radius, delta / dist, dist, obstacleMask);
+        return hit.collider == null && IsBodyPositionClear(to, radius);
+    }
+
+    public bool HasBodyLineOfSight(Vector2 from, Vector2 to, float radius)
+    {
+        Vector2 delta = to - from;
+        float dist = delta.magnitude;
+        if (dist <= 0.0001f)
+            return IsBodyPositionClear(to, radius);
+
+        RaycastHit2D hit = Physics2D.CircleCast(from, radius, delta / dist, dist, obstacleMask);
+        if (hit.collider != null)
+            return false;
+
+        int steps = Mathf.Max(1, Mathf.CeilToInt(dist / (cellSize * 0.5f)));
+        for (int i = 0; i <= steps; i++)
+        {
+            Vector2 p = Vector2.Lerp(from, to, i / (float)steps);
+            if (!IsBodyPositionClear(p, radius))
+                return false;
+        }
+
+        return true;
+    }
+
+    public bool TryFindNearestWalkable(Vector2 worldPosition, float radius, out Vector2 result)
+    {
+        Vector2Int start = WorldToCell(worldPosition);
+        if (IsBodyPositionClear(worldPosition, radius))
+        {
+            result = worldPosition;
+            return true;
+        }
+
+        int maxRing = Mathf.Max(width, height);
+        for (int ring = 0; ring <= maxRing; ring++)
+        {
+            for (int dx = -ring; dx <= ring; dx++)
+            {
+                for (int dy = -ring; dy <= ring; dy++)
+                {
+                    if (Mathf.Abs(dx) != ring && Mathf.Abs(dy) != ring)
+                        continue;
+
+                    Vector2Int cell = new Vector2Int(start.x + dx, start.y + dy);
+                    if (!IsWalkable(cell))
+                        continue;
+
+                    Vector2 candidate = CellToWorld(cell);
+                    if (IsBodyPositionClear(candidate, radius))
+                    {
+                        result = candidate;
+                        return true;
+                    }
+                }
+            }
+        }
+
+        result = worldPosition;
+        return false;
+    }
+
     public IEnumerable<Vector2Int> GetNeighbors(Vector2Int cell)
     {
         Vector2Int[] directions =
@@ -89,16 +202,47 @@ public class OfficeGrid2D : MonoBehaviour
             Vector2Int.up,
             Vector2Int.down,
             Vector2Int.left,
-            Vector2Int.right
+            Vector2Int.right,
+            new Vector2Int(1, 1),
+            new Vector2Int(1, -1),
+            new Vector2Int(-1, 1),
+            new Vector2Int(-1, -1)
         };
 
         foreach (Vector2Int direction in directions)
         {
             Vector2Int neighbor = cell + direction;
 
+            if (Mathf.Abs(direction.x) == 1 && Mathf.Abs(direction.y) == 1)
+            {
+                if (!IsWalkable(cell + new Vector2Int(direction.x, 0)) ||
+                    !IsWalkable(cell + new Vector2Int(0, direction.y)))
+                    continue;
+            }
+
             if (IsWalkable(neighbor))
                 yield return neighbor;
         }
+    }
+
+    private float EstimateClearance(Vector2 worldPosition)
+    {
+        if (obstacleMask.value == 0)
+            return clearanceProbeDistance;
+
+        float best = clearanceProbeDistance;
+        const int rays = 16;
+
+        for (int i = 0; i < rays; i++)
+        {
+            float angle = (i / (float)rays) * Mathf.PI * 2f;
+            Vector2 dir = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+            RaycastHit2D hit = Physics2D.Raycast(worldPosition, dir, clearanceProbeDistance, obstacleMask);
+            if (hit.collider != null)
+                best = Mathf.Min(best, hit.distance);
+        }
+
+        return best;
     }
 
     private void OnDrawGizmosSelected()

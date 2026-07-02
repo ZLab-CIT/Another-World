@@ -147,7 +147,7 @@ Transform:
   m_GameObject: {fileID: 18844745}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -0.26514024, y: -0.66274685, z: 0}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -172,7 +172,8 @@ GameObject:
   - component: {fileID: 119022411}
   - component: {fileID: 119022410}
   - component: {fileID: 119022409}
-  m_Layer: 0
+  - component: {fileID: 119022413}
+  m_Layer: 7
   m_Name: Character (5)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -208,7 +209,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   grid: {fileID: 1054333570}
   assignedDesk: {fileID: 568197847}
-  speed: 2
+  speed: 1.6
   arriveDistance: 0.05
   energy: 85
   focus: 70
@@ -219,13 +220,15 @@ MonoBehaviour:
   socialDecay: 0.3
   decisionDelay: 1
   randomness: 5
-  avoidanceRadius: 0.3
+  avoidanceRadius: 0.2
   slotArriveDistance: 0.15
   slotCommitRadius: 0.3
   slotCommitGrace: 0.4
-  yieldDistance: 1.5
+  urgencyPriorityWeight: 0.35
   stuckTimeout: 4
   stuckMoveThreshold: 0.1
+  replanCooldown: 0.8
+  reservedLookaheadPoints: 5
 --- !u!58 &119022410
 CircleCollider2D:
   m_ObjectHideFlags: 0
@@ -255,7 +258,7 @@ CircleCollider2D:
   m_CallbackLayers:
     serializedVersion: 2
     m_Bits: 4294967295
-  m_IsTrigger: 1
+  m_IsTrigger: 0
   m_UsedByEffector: 0
   m_UsedByComposite: 0
   m_Offset: {x: 0, y: 0}
@@ -269,7 +272,7 @@ Rigidbody2D:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 119022407}
-  m_BodyType: 0
+  m_BodyType: 1
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
@@ -286,7 +289,7 @@ Rigidbody2D:
     m_Bits: 0
   m_Interpolate: 0
   m_SleepingMode: 1
-  m_CollisionDetection: 0
+  m_CollisionDetection: 1
   m_Constraints: 4
 --- !u!212 &119022412
 SpriteRenderer:
@@ -340,6 +343,23 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!114 &119022413
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 119022407}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 61bfb1243b9e4304bb1b1e3d1471c7d1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  acceleration: 8
+  braking: 10
+  neighborLookahead: 0.75
+  passingClearanceMultiplier: 2.8
+  sideStepDistance: 0.35
 --- !u!1 &372631017
 GameObject:
   m_ObjectHideFlags: 0
@@ -352,7 +372,7 @@ GameObject:
   - component: {fileID: 372631021}
   - component: {fileID: 372631020}
   m_Layer: 6
-  m_Name: Desk1 (1)
+  m_Name: Desk2
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -483,7 +503,8 @@ GameObject:
   - component: {fileID: 496072942}
   - component: {fileID: 496072941}
   - component: {fileID: 496072943}
-  m_Layer: 0
+  - component: {fileID: 496072945}
+  m_Layer: 7
   m_Name: Character
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -586,7 +607,7 @@ CircleCollider2D:
   m_CallbackLayers:
     serializedVersion: 2
     m_Bits: 4294967295
-  m_IsTrigger: 1
+  m_IsTrigger: 0
   m_UsedByEffector: 0
   m_UsedByComposite: 0
   m_Offset: {x: 0, y: 0}
@@ -600,7 +621,7 @@ Rigidbody2D:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 496072938}
-  m_BodyType: 0
+  m_BodyType: 1
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
@@ -617,7 +638,7 @@ Rigidbody2D:
     m_Bits: 0
   m_Interpolate: 0
   m_SleepingMode: 1
-  m_CollisionDetection: 0
+  m_CollisionDetection: 1
   m_Constraints: 4
 --- !u!114 &496072943
 MonoBehaviour:
@@ -644,13 +665,32 @@ MonoBehaviour:
   socialDecay: 0.35
   decisionDelay: 1
   randomness: 5
-  avoidanceRadius: 0.3
+  avoidanceRadius: 0.2
   slotArriveDistance: 0.15
   slotCommitRadius: 0.3
   slotCommitGrace: 0.4
-  yieldDistance: 1.5
+  urgencyPriorityWeight: 0.35
   stuckTimeout: 4
   stuckMoveThreshold: 0.1
+  replanCooldown: 0.8
+  reservedLookaheadPoints: 5
+--- !u!114 &496072945
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 496072938}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 61bfb1243b9e4304bb1b1e3d1471c7d1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  acceleration: 8
+  braking: 10
+  neighborLookahead: 0.75
+  passingClearanceMultiplier: 2.8
+  sideStepDistance: 0.35
 --- !u!1 &519420028
 GameObject:
   m_ObjectHideFlags: 0
@@ -837,6 +877,8 @@ MonoBehaviour:
   useTime: 5
   baseScore: 10
   capacity: 1
+  multiUserSlotRadius: 0.5
+  singleUserTargetOffset: {x: 0, y: 0}
   energyChange: -5
   focusChange: -10
   socialChange: -2
@@ -991,7 +1033,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &656161425
 Transform:
   m_ObjectHideFlags: 0
@@ -1072,7 +1114,8 @@ GameObject:
   - component: {fileID: 765906400}
   - component: {fileID: 765906399}
   - component: {fileID: 765906398}
-  m_Layer: 0
+  - component: {fileID: 765906403}
+  m_Layer: 7
   m_Name: Character (1)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1108,7 +1151,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   grid: {fileID: 1054333570}
   assignedDesk: {fileID: 1375734823}
-  speed: 2
+  speed: 1.6
   arriveDistance: 0.05
   energy: 20
   focus: 70
@@ -1119,13 +1162,15 @@ MonoBehaviour:
   socialDecay: 0.3
   decisionDelay: 1
   randomness: 5
-  avoidanceRadius: 0.3
+  avoidanceRadius: 0.2
   slotArriveDistance: 0.15
   slotCommitRadius: 0.3
   slotCommitGrace: 0.4
-  yieldDistance: 1.5
+  urgencyPriorityWeight: 0.35
   stuckTimeout: 4
   stuckMoveThreshold: 0.1
+  replanCooldown: 0.8
+  reservedLookaheadPoints: 5
 --- !u!58 &765906399
 CircleCollider2D:
   m_ObjectHideFlags: 0
@@ -1155,7 +1200,7 @@ CircleCollider2D:
   m_CallbackLayers:
     serializedVersion: 2
     m_Bits: 4294967295
-  m_IsTrigger: 1
+  m_IsTrigger: 0
   m_UsedByEffector: 0
   m_UsedByComposite: 0
   m_Offset: {x: 0, y: 0}
@@ -1169,7 +1214,7 @@ Rigidbody2D:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 765906396}
-  m_BodyType: 0
+  m_BodyType: 1
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
@@ -1186,7 +1231,7 @@ Rigidbody2D:
     m_Bits: 0
   m_Interpolate: 0
   m_SleepingMode: 1
-  m_CollisionDetection: 0
+  m_CollisionDetection: 1
   m_Constraints: 4
 --- !u!212 &765906401
 SpriteRenderer:
@@ -1240,6 +1285,23 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!114 &765906403
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 765906396}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 61bfb1243b9e4304bb1b1e3d1471c7d1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  acceleration: 8
+  braking: 10
+  neighborLookahead: 0.75
+  passingClearanceMultiplier: 2.8
+  sideStepDistance: 0.35
 --- !u!1 &811349777
 GameObject:
   m_ObjectHideFlags: 0
@@ -1504,6 +1566,8 @@ MonoBehaviour:
   useTime: 5
   baseScore: 10
   capacity: 1
+  multiUserSlotRadius: 0.5
+  singleUserTargetOffset: {x: 0, y: 0}
   energyChange: -5
   focusChange: -10
   socialChange: -2
@@ -1609,6 +1673,8 @@ MonoBehaviour:
   useTime: 4
   baseScore: 5
   capacity: 3
+  multiUserSlotRadius: 0.5
+  singleUserTargetOffset: {x: 0, y: 0}
   energyChange: -2
   focusChange: 5
   socialChange: 35
@@ -1675,6 +1741,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1054333571}
   - component: {fileID: 1054333570}
+  - component: {fileID: 1054333572}
   m_Layer: 0
   m_Name: OfficeGrid
   m_TagString: Untagged
@@ -1701,8 +1768,10 @@ MonoBehaviour:
   obstacleMask:
     serializedVersion: 2
     m_Bits: 64
-  agentClearanceRadius: 0.55
+  agentClearanceRadius: 0.3
   obstacleCheckSize: 1
+  lowClearancePenalty: 4
+  clearanceProbeDistance: 2
 --- !u!4 &1054333571
 Transform:
   m_ObjectHideFlags: 0
@@ -1718,6 +1787,22 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1054333572
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1054333569}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9b640c695adcd3c4ea937f3f645a929f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  grid: {fileID: 1054333570}
+  drawCells: 1
+  drawClearanceCircles: 0
+  selectedOnly: 0
 --- !u!1 &1111891568
 GameObject:
   m_ObjectHideFlags: 0
@@ -1727,26 +1812,14 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1111891570}
-  - component: {fileID: 1111891569}
+  - component: {fileID: 1111891571}
   m_Layer: 0
-  m_Name: _Bootstrapper
+  m_Name: RuntimeSettings
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1111891569
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1111891568}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1f5e660758a7375418dc2254a9deeee8, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
 --- !u!4 &1111891570
 Transform:
   m_ObjectHideFlags: 0
@@ -1762,6 +1835,21 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1111891571
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1111891568}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aea16e58cff71c145ab8394d99adad0b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  targetFrameRate: 60
+  neverSleep: 1
+  disableVSync: 1
 --- !u!1 &1128272430
 GameObject:
   m_ObjectHideFlags: 0
@@ -1775,7 +1863,8 @@ GameObject:
   - component: {fileID: 1128272434}
   - component: {fileID: 1128272433}
   - component: {fileID: 1128272432}
-  m_Layer: 0
+  - component: {fileID: 1128272436}
+  m_Layer: 7
   m_Name: Character (4)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1822,13 +1911,15 @@ MonoBehaviour:
   socialDecay: 0.6
   decisionDelay: 1
   randomness: 5
-  avoidanceRadius: 0.3
+  avoidanceRadius: 0.2
   slotArriveDistance: 0.15
   slotCommitRadius: 0.3
   slotCommitGrace: 0.4
-  yieldDistance: 1.5
+  urgencyPriorityWeight: 0.35
   stuckTimeout: 4
   stuckMoveThreshold: 0.1
+  replanCooldown: 0.8
+  reservedLookaheadPoints: 5
 --- !u!58 &1128272433
 CircleCollider2D:
   m_ObjectHideFlags: 0
@@ -1858,7 +1949,7 @@ CircleCollider2D:
   m_CallbackLayers:
     serializedVersion: 2
     m_Bits: 4294967295
-  m_IsTrigger: 1
+  m_IsTrigger: 0
   m_UsedByEffector: 0
   m_UsedByComposite: 0
   m_Offset: {x: 0, y: 0}
@@ -1872,7 +1963,7 @@ Rigidbody2D:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1128272430}
-  m_BodyType: 0
+  m_BodyType: 1
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
@@ -1889,7 +1980,7 @@ Rigidbody2D:
     m_Bits: 0
   m_Interpolate: 0
   m_SleepingMode: 1
-  m_CollisionDetection: 0
+  m_CollisionDetection: 1
   m_Constraints: 4
 --- !u!212 &1128272435
 SpriteRenderer:
@@ -1943,6 +2034,23 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!114 &1128272436
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1128272430}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 61bfb1243b9e4304bb1b1e3d1471c7d1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  acceleration: 8
+  braking: 10
+  neighborLookahead: 0.75
+  passingClearanceMultiplier: 2.8
+  sideStepDistance: 0.35
 --- !u!1 &1208889902
 GameObject:
   m_ObjectHideFlags: 0
@@ -2026,6 +2134,8 @@ MonoBehaviour:
   useTime: 5
   baseScore: 10
   capacity: 1
+  multiUserSlotRadius: 0.5
+  singleUserTargetOffset: {x: 0, y: 0}
   energyChange: -5
   focusChange: -10
   socialChange: -2
@@ -2131,6 +2241,8 @@ MonoBehaviour:
   useTime: 5
   baseScore: 10
   capacity: 1
+  multiUserSlotRadius: 0.5
+  singleUserTargetOffset: {x: 0, y: 0}
   energyChange: -5
   focusChange: -10
   socialChange: -2
@@ -2236,6 +2348,8 @@ MonoBehaviour:
   useTime: 2
   baseScore: 5
   capacity: 1
+  multiUserSlotRadius: 0.5
+  singleUserTargetOffset: {x: 0, y: 0}
   energyChange: 35
   focusChange: 5
   socialChange: 0
@@ -2341,6 +2455,8 @@ MonoBehaviour:
   useTime: 4
   baseScore: 5
   capacity: 2
+  multiUserSlotRadius: 0.5
+  singleUserTargetOffset: {x: 0, y: 0}
   energyChange: 15
   focusChange: 25
   socialChange: 0
@@ -2616,6 +2732,8 @@ MonoBehaviour:
   useTime: 5
   baseScore: 10
   capacity: 1
+  multiUserSlotRadius: 0.5
+  singleUserTargetOffset: {x: 0, y: 0}
   energyChange: -5
   focusChange: -10
   socialChange: -2
@@ -2721,6 +2839,8 @@ MonoBehaviour:
   useTime: 5
   baseScore: 10
   capacity: 1
+  multiUserSlotRadius: 0.5
+  singleUserTargetOffset: {x: 0, y: 0}
   energyChange: -5
   focusChange: -10
   socialChange: -2
@@ -2790,7 +2910,8 @@ GameObject:
   - component: {fileID: 2072425297}
   - component: {fileID: 2072425296}
   - component: {fileID: 2072425295}
-  m_Layer: 0
+  - component: {fileID: 2072425299}
+  m_Layer: 7
   m_Name: Character (3)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -2826,7 +2947,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   grid: {fileID: 1054333570}
   assignedDesk: {fileID: 2059408493}
-  speed: 2
+  speed: 1.6
   arriveDistance: 0.05
   energy: 100
   focus: 100
@@ -2837,13 +2958,15 @@ MonoBehaviour:
   socialDecay: 0.1
   decisionDelay: 1
   randomness: 5
-  avoidanceRadius: 0.3
+  avoidanceRadius: 0.2
   slotArriveDistance: 0.15
   slotCommitRadius: 0.3
   slotCommitGrace: 0.4
-  yieldDistance: 1.5
+  urgencyPriorityWeight: 0.35
   stuckTimeout: 4
   stuckMoveThreshold: 0.1
+  replanCooldown: 0.8
+  reservedLookaheadPoints: 5
 --- !u!58 &2072425296
 CircleCollider2D:
   m_ObjectHideFlags: 0
@@ -2873,7 +2996,7 @@ CircleCollider2D:
   m_CallbackLayers:
     serializedVersion: 2
     m_Bits: 4294967295
-  m_IsTrigger: 1
+  m_IsTrigger: 0
   m_UsedByEffector: 0
   m_UsedByComposite: 0
   m_Offset: {x: 0, y: 0}
@@ -2887,7 +3010,7 @@ Rigidbody2D:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2072425293}
-  m_BodyType: 0
+  m_BodyType: 1
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
@@ -2904,7 +3027,7 @@ Rigidbody2D:
     m_Bits: 0
   m_Interpolate: 0
   m_SleepingMode: 1
-  m_CollisionDetection: 0
+  m_CollisionDetection: 1
   m_Constraints: 4
 --- !u!212 &2072425298
 SpriteRenderer:
@@ -2958,6 +3081,23 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!114 &2072425299
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2072425293}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 61bfb1243b9e4304bb1b1e3d1471c7d1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  acceleration: 8
+  braking: 10
+  neighborLookahead: 0.75
+  passingClearanceMultiplier: 2.8
+  sideStepDistance: 0.35
 --- !u!1 &2132121407
 GameObject:
   m_ObjectHideFlags: 0
@@ -2971,7 +3111,8 @@ GameObject:
   - component: {fileID: 2132121411}
   - component: {fileID: 2132121410}
   - component: {fileID: 2132121409}
-  m_Layer: 0
+  - component: {fileID: 2132121413}
+  m_Layer: 7
   m_Name: Character (2)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -3018,13 +3159,15 @@ MonoBehaviour:
   socialDecay: 1.2
   decisionDelay: 1
   randomness: 5
-  avoidanceRadius: 0.3
+  avoidanceRadius: 0.2
   slotArriveDistance: 0.15
   slotCommitRadius: 0.3
   slotCommitGrace: 0.4
-  yieldDistance: 1.5
+  urgencyPriorityWeight: 0.35
   stuckTimeout: 4
   stuckMoveThreshold: 0.1
+  replanCooldown: 0.8
+  reservedLookaheadPoints: 5
 --- !u!58 &2132121410
 CircleCollider2D:
   m_ObjectHideFlags: 0
@@ -3054,7 +3197,7 @@ CircleCollider2D:
   m_CallbackLayers:
     serializedVersion: 2
     m_Bits: 4294967295
-  m_IsTrigger: 1
+  m_IsTrigger: 0
   m_UsedByEffector: 0
   m_UsedByComposite: 0
   m_Offset: {x: 0, y: 0}
@@ -3068,7 +3211,7 @@ Rigidbody2D:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2132121407}
-  m_BodyType: 0
+  m_BodyType: 1
   m_Simulated: 1
   m_UseFullKinematicContacts: 0
   m_UseAutoMass: 0
@@ -3085,7 +3228,7 @@ Rigidbody2D:
     m_Bits: 0
   m_Interpolate: 0
   m_SleepingMode: 1
-  m_CollisionDetection: 0
+  m_CollisionDetection: 1
   m_Constraints: 4
 --- !u!212 &2132121412
 SpriteRenderer:
@@ -3139,6 +3282,23 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!114 &2132121413
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2132121407}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 61bfb1243b9e4304bb1b1e3d1471c7d1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  acceleration: 8
+  braking: 10
+  neighborLookahead: 0.75
+  passingClearanceMultiplier: 2.8
+  sideStepDistance: 0.35
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -3146,8 +3306,8 @@ SceneRoots:
   - {fileID: 519420032}
   - {fileID: 619394802}
   - {fileID: 1111891570}
+  - {fileID: 1054333571}
   - {fileID: 822814638}
   - {fileID: 1208889903}
   - {fileID: 18844746}
   - {fileID: 1704556778}
-  - {fileID: 1054333571}
