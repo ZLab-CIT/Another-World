@@ -85,6 +85,9 @@ public class AIWorkerAgent : MonoBehaviour
     private OfficeActionPoint departureAction;
     private float departureActionExpiresAt;
 
+    [SerializeField] private Animator anim;
+    private Vector2 lastFacing = Vector2.down;
+
     public OfficeGrid2D Grid => grid;
     public Vector2 CurrentVelocity => motor != null ? motor.Velocity : Vector2.zero;
     public bool IsBlocking => state == WorkerState.Acting;
@@ -116,13 +119,10 @@ public class AIWorkerAgent : MonoBehaviour
             motor = gameObject.AddComponent<OfficeWorkerMotor2D>();
 
         if (grid == null)
-        {
-#if UNITY_2023_1_OR_NEWER
             grid = FindFirstObjectByType<OfficeGrid2D>();
-#else
-            grid = FindObjectOfType<OfficeGrid2D>();
-#endif
-        }
+
+        if (anim == null)
+            anim = GetComponentInChildren<Animator>();
 
         crowd = OfficeCrowdCoordinator2D.Ensure();
         crowd.Register(this);
@@ -166,6 +166,7 @@ public class AIWorkerAgent : MonoBehaviour
                     FinishAction();
                 break;
         }
+        UpdateAnimation();
     }
 
     private void OnDestroy()
@@ -629,5 +630,27 @@ public class AIWorkerAgent : MonoBehaviour
         focus = Mathf.Clamp(focus + focusChange, 0f, 100f);
         social = Mathf.Clamp(social + socialChange, 0f, 100f);
         productivity = Mathf.Max(0f, productivity + productivityChange);
+    }
+
+    private void UpdateAnimation()
+    {
+        if (anim == null || motor == null)
+            return;
+
+        Vector2 velocity = motor.Velocity;
+        bool isMoving = velocity.sqrMagnitude > 0.0001f;
+
+        if (isMoving)
+        {
+            Vector2 dir = velocity.normalized;
+            if (Mathf.Abs(dir.x) > Mathf.Abs(dir.y))
+                lastFacing = new Vector2(Mathf.Sign(dir.x), 0f);
+            else
+                lastFacing = new Vector2(0f, Mathf.Sign(dir.y));
+        }
+
+        anim.SetBool("IsMoving", isMoving);
+        anim.SetFloat("MoveX", lastFacing.x);
+        anim.SetFloat("MoveY", lastFacing.y);
     }
 }
