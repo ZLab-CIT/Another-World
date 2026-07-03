@@ -81,10 +81,32 @@ public class AIWorkerAgent : MonoBehaviour
     private List<Vector2> currentPath;
     private int pathIndex;
     private Vector2 currentSafeActionTarget;
+    private readonly List<Vector2> actionApproachWaypoints = new List<Vector2>();
+    private OfficeActionPoint departureAction;
+    private float departureActionExpiresAt;
 
     public OfficeGrid2D Grid => grid;
     public Vector2 CurrentVelocity => motor != null ? motor.Velocity : Vector2.zero;
     public bool IsBlocking => state == WorkerState.Acting;
+    public float CrowdSeparationWeight
+    {
+        get
+        {
+            switch (state)
+            {
+                case WorkerState.Moving:
+                case WorkerState.Planning:
+                case WorkerState.Replanning:
+                    return 1f;
+                case WorkerState.Thinking:
+                    return 0.65f;
+                case WorkerState.Acting:
+                    return 0.2f;
+                default:
+                    return 0.5f;
+            }
+        }
+    }
 
     private void Start()
     {
@@ -156,6 +178,34 @@ public class AIWorkerAgent : MonoBehaviour
     {
         return rb != null ? rb.position : (Vector2)transform.position;
     }
+    public bool TryApplyCrowdSeparation(Vector2 displacement, Vector2 otherPosition)
+    {
+        if (displacement.sqrMagnitude <= 0.000001f)
+            return false;
+
+        if (rb == null)
+            rb = GetComponent<Rigidbody2D>();
+
+        if (grid == null || rb == null)
+            return false;
+
+        Vector2 from = GetPosition();
+        Vector2 to = from + displacement;
+        if (Vector2.Distance(to, otherPosition) <= Vector2.Distance(from, otherPosition) + 0.0001f)
+            return false;
+
+        if (!grid.CanRecoverBody(from, to, avoidanceRadius))
+            return false;
+
+        rb.MovePosition(to);
+        if (motor != null)
+            motor.Stop();
+
+        stuckCheckPos = to;
+        stuckTimer = 0f;
+        nextReplanTime = Mathf.Min(nextReplanTime, Time.time + replanCooldown * 0.5f);
+        return true;
+    }
 
     // Kept so older debug/experimental components still compile while the
     // movement authority moves to OfficeWorkerMotor2D.
@@ -165,6 +215,38 @@ public class AIWorkerAgent : MonoBehaviour
             rb = GetComponent<Rigidbody2D>();
 
         rb.MovePosition(rb.position + velocity * dt);
+    }
+
+    public bool TryGetProtectedInteractionSpace(out Vector2 furniturePoint, out Vector2 workerPoint, out float radius)
+    {
+        furniturePoint = GetPosition();
+        workerPoint = GetPosition();
+        radius = 0f;
+
+        if (state != WorkerState.Acting || currentAction == null)
+            return false;
+
+        return currentAction.TryGetInteractionBlocker(
+            grid,
+            GetPosition(),
+            avoidanceRadius,
+            out furniturePoint,
+            out workerPoint,
+            out radius);
+    }
+
+    public bool TryGetProtectedActionGroup(AIWorkerAgent requester, out Vector2 center, out float radius)
+    {
+        center = GetPosition();
+        radius = 0f;
+
+        if (currentAction == null)
+            return false;
+
+        if (requester != null && currentAction.IsReservedBy(requester))
+            return false;
+
+        return currentAction.TryGetFullActionBlocker(avoidanceRadius, out center, out radius);
     }
 
     public float GetRightOfWayPriority()
@@ -261,7 +343,7 @@ public class AIWorkerAgent : MonoBehaviour
         }
 
         Vector2 targetPosition = currentAction.GetTargetPosition(this);
-        currentPath = OfficePathfinder2D.FindPath(grid, GetPosition(), targetPosition, this, avoidanceRadius);
+        currentPath = FindPathToCurrentAction(targetPosition);
         if (currentPath == null || currentPath.Count == 0)
         {
             currentAction.Release(this);
@@ -278,6 +360,97 @@ public class AIWorkerAgent : MonoBehaviour
         stuckCheckPos = GetPosition();
         nextReplanTime = Time.time + replanCooldown;
         state = WorkerState.Moving;
+    }
+
+    private List<Vector2> FindPathToCurrentAction(Vector2 targetPosition)
+    {
+        List<Vector2> fullPath = null;
+        Vector2 segmentStart = GetPosition();
+
+        if (!AddDepartureWaypoint(targetPosition, segmentStart, ref fullPath, ref segmentStart))
+            return null;
+
+        if (!currentAction.GetApproachWaypoints(this, grid, avoidanceRadius, actionApproachWaypoints))
+            return null;
+
+        for (int i = 0; i < actionApproachWaypoints.Count; i++)
+        {
+            Vector2 waypoint = actionApproachWaypoints[i];
+            if (Vector2.Distance(segmentStart, waypoint) <= arriveDistance)
+                continue;
+
+            List<Vector2> segment = OfficePathfinder2D.FindPath(grid, segmentStart, waypoint, this, avoidanceRadius);
+            if (!AppendPathSegment(ref fullPath, segment))
+                return null;
+
+            segmentStart = fullPath[fullPath.Count - 1];
+        }
+
+        List<Vector2> finalSegment = OfficePathfinder2D.FindPath(grid, segmentStart, targetPosition, this, avoidanceRadius);
+        if (!AppendPathSegment(ref fullPath, finalSegment))
+            return null;
+
+        return fullPath;
+    }
+
+    private bool AddDepartureWaypoint(
+        Vector2 targetPosition,
+        Vector2 initialSegmentStart,
+        ref List<Vector2> fullPath,
+        ref Vector2 segmentStart)
+    {
+        if (departureAction == null || departureAction == currentAction || Time.time > departureActionExpiresAt)
+        {
+            departureAction = null;
+            return true;
+        }
+
+        bool requiresDeparture = departureAction.NeedsDepartureWaypoint(initialSegmentStart, targetPosition, avoidanceRadius);
+        if (!requiresDeparture)
+        {
+            departureAction = null;
+            return true;
+        }
+
+        if (!departureAction.TryGetDepartureWaypoint(
+                initialSegmentStart,
+                targetPosition,
+                grid,
+                avoidanceRadius,
+                out Vector2 waypoint))
+            return false;
+
+        if (Vector2.Distance(segmentStart, waypoint) <= arriveDistance)
+        {
+            departureAction = null;
+            return true;
+        }
+
+        List<Vector2> segment = OfficePathfinder2D.FindPath(grid, segmentStart, waypoint, this, avoidanceRadius);
+        if (!AppendPathSegment(ref fullPath, segment))
+            return false;
+
+        departureAction = null;
+        segmentStart = fullPath[fullPath.Count - 1];
+        return true;
+    }
+
+    private static bool AppendPathSegment(ref List<Vector2> fullPath, List<Vector2> segment)
+    {
+        if (segment == null || segment.Count == 0)
+            return false;
+
+        if (fullPath == null)
+        {
+            fullPath = new List<Vector2>(segment);
+            return true;
+        }
+
+        int startIndex = Vector2.Distance(fullPath[fullPath.Count - 1], segment[0]) <= 0.001f ? 1 : 0;
+        for (int i = startIndex; i < segment.Count; i++)
+            fullPath.Add(segment[i]);
+
+        return true;
     }
 
     private void TickMoving()
@@ -373,8 +546,13 @@ public class AIWorkerAgent : MonoBehaviour
     {
         if (currentAction != null)
         {
+            OfficeActionPoint finishedAction = currentAction;
+            float departureHoldSeconds = Mathf.Max(1f, decisionDelay + replanCooldown + 0.5f);
             currentAction.ApplyTo(this);
             currentAction.Release(this);
+            currentAction.HoldDepartingAgent(this, departureHoldSeconds);
+            departureAction = finishedAction;
+            departureActionExpiresAt = Time.time + departureHoldSeconds;
             currentAction = null;
         }
 
@@ -395,6 +573,8 @@ public class AIWorkerAgent : MonoBehaviour
             currentAction.Release(this);
             currentAction = null;
         }
+
+        departureAction = null;
 
         currentPath = null;
         pathIndex = 0;

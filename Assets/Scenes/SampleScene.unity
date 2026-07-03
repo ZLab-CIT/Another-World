@@ -220,13 +220,13 @@ MonoBehaviour:
   socialDecay: 0.3
   decisionDelay: 1
   randomness: 5
-  avoidanceRadius: 0.2
+  avoidanceRadius: 0.25
   slotArriveDistance: 0.15
   slotCommitRadius: 0.3
   slotCommitGrace: 0.4
   urgencyPriorityWeight: 0.35
-  stuckTimeout: 4
-  stuckMoveThreshold: 0.1
+  stuckTimeout: 2.25
+  stuckMoveThreshold: 0.08
   replanCooldown: 0.8
   reservedLookaheadPoints: 5
 --- !u!58 &119022410
@@ -357,9 +357,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   acceleration: 8
   braking: 10
-  neighborLookahead: 0.75
-  passingClearanceMultiplier: 2.8
-  sideStepDistance: 0.35
+  neighborLookahead: 1.1
+  passingClearanceMultiplier: 2.6
+  sideStepDistance: 0.4
 --- !u!1 &372631017
 GameObject:
   m_ObjectHideFlags: 0
@@ -665,13 +665,13 @@ MonoBehaviour:
   socialDecay: 0.35
   decisionDelay: 1
   randomness: 5
-  avoidanceRadius: 0.2
+  avoidanceRadius: 0.25
   slotArriveDistance: 0.15
   slotCommitRadius: 0.3
   slotCommitGrace: 0.4
   urgencyPriorityWeight: 0.35
-  stuckTimeout: 4
-  stuckMoveThreshold: 0.1
+  stuckTimeout: 2.25
+  stuckMoveThreshold: 0.08
   replanCooldown: 0.8
   reservedLookaheadPoints: 5
 --- !u!114 &496072945
@@ -688,9 +688,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   acceleration: 8
   braking: 10
-  neighborLookahead: 0.75
-  passingClearanceMultiplier: 2.8
-  sideStepDistance: 0.35
+  neighborLookahead: 1.1
+  passingClearanceMultiplier: 2.6
+  sideStepDistance: 0.4
 --- !u!1 &519420028
 GameObject:
   m_ObjectHideFlags: 0
@@ -1162,13 +1162,13 @@ MonoBehaviour:
   socialDecay: 0.3
   decisionDelay: 1
   randomness: 5
-  avoidanceRadius: 0.2
+  avoidanceRadius: 0.25
   slotArriveDistance: 0.15
   slotCommitRadius: 0.3
   slotCommitGrace: 0.4
   urgencyPriorityWeight: 0.35
-  stuckTimeout: 4
-  stuckMoveThreshold: 0.1
+  stuckTimeout: 2.25
+  stuckMoveThreshold: 0.08
   replanCooldown: 0.8
   reservedLookaheadPoints: 5
 --- !u!58 &765906399
@@ -1299,9 +1299,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   acceleration: 8
   braking: 10
-  neighborLookahead: 0.75
-  passingClearanceMultiplier: 2.8
-  sideStepDistance: 0.35
+  neighborLookahead: 1.1
+  passingClearanceMultiplier: 2.6
+  sideStepDistance: 0.4
 --- !u!1 &811349777
 GameObject:
   m_ObjectHideFlags: 0
@@ -1911,13 +1911,13 @@ MonoBehaviour:
   socialDecay: 0.6
   decisionDelay: 1
   randomness: 5
-  avoidanceRadius: 0.2
+  avoidanceRadius: 0.25
   slotArriveDistance: 0.15
   slotCommitRadius: 0.3
   slotCommitGrace: 0.4
   urgencyPriorityWeight: 0.35
-  stuckTimeout: 4
-  stuckMoveThreshold: 0.1
+  stuckTimeout: 2.25
+  stuckMoveThreshold: 0.08
   replanCooldown: 0.8
   reservedLookaheadPoints: 5
 --- !u!58 &1128272433
@@ -2048,9 +2048,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   acceleration: 8
   braking: 10
-  neighborLookahead: 0.75
-  passingClearanceMultiplier: 2.8
-  sideStepDistance: 0.35
+  neighborLookahead: 1.1
+  passingClearanceMultiplier: 2.6
+  sideStepDistance: 0.4
 --- !u!1 &1208889902
 GameObject:
   m_ObjectHideFlags: 0
@@ -2958,13 +2958,13 @@ MonoBehaviour:
   socialDecay: 0.1
   decisionDelay: 1
   randomness: 5
-  avoidanceRadius: 0.2
+  avoidanceRadius: 0.25
   slotArriveDistance: 0.15
   slotCommitRadius: 0.3
   slotCommitGrace: 0.4
   urgencyPriorityWeight: 0.35
-  stuckTimeout: 4
-  stuckMoveThreshold: 0.1
+  stuckTimeout: 2.25
+  stuckMoveThreshold: 0.08
   replanCooldown: 0.8
   reservedLookaheadPoints: 5
 --- !u!58 &2072425296
@@ -3095,9 +3095,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   acceleration: 8
   braking: 10
-  neighborLookahead: 0.75
-  passingClearanceMultiplier: 2.8
-  sideStepDistance: 0.35
+  neighborLookahead: 1.1
+  passingClearanceMultiplier: 2.6
+  sideStepDistance: 0.4
 --- !u!1 &2132121407
 GameObject:
   m_ObjectHideFlags: 0
@@ -3159,13 +3159,13 @@ MonoBehaviour:
   socialDecay: 1.2
   decisionDelay: 1
   randomness: 5
-  avoidanceRadius: 0.2
+  avoidanceRadius: 0.25
   slotArriveDistance: 0.15
   slotCommitRadius: 0.3
   slotCommitGrace: 0.4
   urgencyPriorityWeight: 0.35
-  stuckTimeout: 4
-  stuckMoveThreshold: 0.1
+  stuckTimeout: 2.25
+  stuckMoveThreshold: 0.08
   replanCooldown: 0.8
   reservedLookaheadPoints: 5
 --- !u!58 &2132121410
@@ -3296,9 +3296,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   acceleration: 8
   braking: 10
-  neighborLookahead: 0.75
-  passingClearanceMultiplier: 2.8
-  sideStepDistance: 0.35
+  neighborLookahead: 1.1
+  passingClearanceMultiplier: 2.6
+  sideStepDistance: 0.4
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

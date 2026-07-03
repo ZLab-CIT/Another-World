@@ -123,6 +123,13 @@ public class OfficeGrid2D : MonoBehaviour
 
         return Physics2D.OverlapCircle(worldPosition, radius, obstacleMask) == null;
     }
+    public bool IsBodyPhysicallyClear(Vector2 worldPosition, float radius)
+    {
+        if (!InBounds(WorldToCell(worldPosition)))
+            return false;
+
+        return Physics2D.OverlapCircle(worldPosition, radius, obstacleMask) == null;
+    }
 
     public bool CanMoveBody(Vector2 from, Vector2 to, float radius)
     {
@@ -134,6 +141,33 @@ public class OfficeGrid2D : MonoBehaviour
 
         RaycastHit2D hit = Physics2D.CircleCast(from, radius, delta / dist, dist, obstacleMask);
         return hit.collider == null && IsBodyPositionClear(to, radius);
+    }
+    public bool CanMoveBodyPhysically(Vector2 from, Vector2 to, float radius)
+    {
+        Vector2 delta = to - from;
+        float dist = delta.magnitude;
+
+        if (dist <= 0.0001f)
+            return IsBodyPhysicallyClear(to, radius);
+
+        RaycastHit2D hit = Physics2D.CircleCast(from, radius, delta / dist, dist, obstacleMask);
+        return hit.collider == null && IsBodyPhysicallyClear(to, radius);
+    }
+
+    public bool CanRecoverBody(Vector2 from, Vector2 to, float radius)
+    {
+        if (!InBounds(WorldToCell(to)))
+            return false;
+
+        if (CanMoveBodyPhysically(from, to, radius))
+            return true;
+
+        float fromPenalty = GetBodyBlockPenalty(from, radius);
+        if (fromPenalty <= 0.0001f)
+            return false;
+
+        float toPenalty = GetBodyBlockPenalty(to, radius);
+        return toPenalty < fromPenalty - 0.0001f;
     }
 
     public bool HasBodyLineOfSight(Vector2 from, Vector2 to, float radius)
@@ -243,6 +277,29 @@ public class OfficeGrid2D : MonoBehaviour
         }
 
         return best;
+    }
+    private float GetBodyBlockPenalty(Vector2 worldPosition, float radius)
+    {
+        if (!InBounds(WorldToCell(worldPosition)))
+            return float.PositiveInfinity;
+
+        float probeRadius = Mathf.Max(radius, agentClearanceRadius);
+        Collider2D[] hits = Physics2D.OverlapCircleAll(worldPosition, probeRadius, obstacleMask);
+        float penalty = 0f;
+
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider2D hit = hits[i];
+            if (hit == null || !hit.enabled)
+                continue;
+
+            float distance = Vector2.Distance(worldPosition, hit.ClosestPoint(worldPosition));
+            float bodyOverlap = Mathf.Max(0f, radius - distance);
+            float clearanceShortfall = Mathf.Max(0f, agentClearanceRadius - distance) * 0.35f;
+            penalty += Mathf.Max(bodyOverlap, clearanceShortfall);
+        }
+
+        return penalty;
     }
 
     private void OnDrawGizmosSelected()

@@ -25,6 +25,8 @@ public class OfficeEncounterCoordinator2D : MonoBehaviour
         public int passerId;
         public OfficeEncounterRole lowRole;
         public OfficeEncounterRole highRole;
+        public Vector2 lowSideDirection;
+        public Vector2 highSideDirection;
         public float expiresAt;
     }
 
@@ -36,7 +38,7 @@ public class OfficeEncounterCoordinator2D : MonoBehaviour
     [Header("Passing")]
     public float mutualPassSpeed = 0.95f;
     public float passerSpeed = 0.9f;
-    public float yielderSpeed = 0.05f;
+    public float yielderSpeed = 0.25f;
 
     private readonly Dictionary<long, Encounter> encounters = new Dictionary<long, Encounter>();
 
@@ -97,8 +99,9 @@ public class OfficeEncounterCoordinator2D : MonoBehaviour
         }
 
         OfficeEncounterRole role = selfId == encounter.lowId ? encounter.lowRole : encounter.highRole;
+        Vector2 sideDirection = selfId == encounter.lowId ? encounter.lowSideDirection : encounter.highSideDirection;
         decision.role = role;
-        decision.sideDirection = right;
+        decision.sideDirection = sideDirection.sqrMagnitude > 0.0001f ? sideDirection.normalized : right;
         decision.speedMultiplier = GetSpeedMultiplier(role);
         return decision;
     }
@@ -122,6 +125,8 @@ public class OfficeEncounterCoordinator2D : MonoBehaviour
             ? b.CurrentVelocity.normalized
             : ((Vector2)a.GetPosition() - b.GetPosition()).normalized;
 
+        Vector2 aRight = RightOf(aDesiredDir);
+        Vector2 bRight = RightOf(bDir);
         bool aRightOpen = HasRightLane(a, grid, crowd, aDesiredDir, radius, sideStepDistance);
         bool bRightOpen = HasRightLane(b, grid, crowd, bDir, radius, sideStepDistance);
 
@@ -166,6 +171,8 @@ public class OfficeEncounterCoordinator2D : MonoBehaviour
             passerId = passerId,
             lowRole = aId == lowId ? aRole : bRole,
             highRole = aId == highId ? aRole : bRole,
+            lowSideDirection = aId == lowId ? aRight : bRight,
+            highSideDirection = aId == highId ? aRight : bRight,
             expiresAt = now + encounterLifetime
         };
     }
@@ -181,10 +188,10 @@ public class OfficeEncounterCoordinator2D : MonoBehaviour
         if (forward.sqrMagnitude <= 0.0001f)
             return false;
 
-        Vector2 right = new Vector2(forward.y, -forward.x);
+        Vector2 right = RightOf(forward);
         Vector2 candidate = worker.GetPosition() + right * sideStepDistance;
-        return grid.IsBodyPositionClear(candidate, radius) &&
-               crowd.IsWorkerSpaceFree(candidate, radius, worker);
+        return grid.IsBodyPhysicallyClear(candidate, radius) &&
+               crowd.IsWorkerMoveClear(worker.GetPosition(), candidate, radius, worker);
     }
 
     private float GetSpeedMultiplier(OfficeEncounterRole role)
@@ -200,6 +207,11 @@ public class OfficeEncounterCoordinator2D : MonoBehaviour
             default:
                 return 1f;
         }
+    }
+
+    private static Vector2 RightOf(Vector2 forward)
+    {
+        return new Vector2(forward.y, -forward.x);
     }
 
     private static long MakeKey(int a, int b)

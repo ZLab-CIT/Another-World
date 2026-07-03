@@ -46,7 +46,7 @@ public static class OfficePathfinder2D
             open.RemoveAt(bestIndex);
 
             if (current.cell == goal)
-                return Smooth(grid, BuildWorldPath(grid, cameFrom, current.cell, safeStart, safeTarget), workerRadius);
+                return Smooth(grid, BuildWorldPath(grid, cameFrom, current.cell, safeStart, safeTarget), workerRadius, requester);
 
             if (!closed.Add(current.cell))
                 continue;
@@ -60,11 +60,15 @@ public static class OfficePathfinder2D
                 if (!grid.IsBodyPositionClear(neighborWorld, workerRadius) && neighbor != goal)
                     continue;
 
+                OfficeCrowdCoordinator2D crowd = OfficeCrowdCoordinator2D.Instance;
+                if (crowd != null && !crowd.IsWorkerSpaceFree(neighborWorld, workerRadius, requester))
+                    continue;
+
                 float moveCost = Vector2Int.Distance(current.cell, neighbor);
                 float turnCost = GetTurnCost(cameFrom, current.cell, neighbor);
                 float staticCost = grid.GetStaticCost(neighbor, workerRadius);
-                float crowdCost = OfficeCrowdCoordinator2D.Instance != null
-                    ? OfficeCrowdCoordinator2D.Instance.GetPathCost(neighbor, requester)
+                float crowdCost = crowd != null
+                    ? crowd.GetPathCost(neighbor, requester)
                     : 0f;
 
                 float tentative = current.g + moveCost + turnCost + staticCost + crowdCost;
@@ -163,7 +167,7 @@ public static class OfficePathfinder2D
         return path;
     }
 
-    private static List<Vector2> Smooth(OfficeGrid2D grid, List<Vector2> path, float workerRadius)
+    private static List<Vector2> Smooth(OfficeGrid2D grid, List<Vector2> path, float workerRadius, AIWorkerAgent requester)
     {
         if (path == null || path.Count <= 2)
             return path;
@@ -176,7 +180,7 @@ public static class OfficePathfinder2D
             int next = anchor + 1;
             for (int i = path.Count - 1; i > anchor + 1; i--)
             {
-                if (grid.HasBodyLineOfSight(path[anchor], path[i], workerRadius))
+                if (HasClearLine(grid, path[anchor], path[i], workerRadius, requester))
                 {
                     next = i;
                     break;
@@ -188,5 +192,21 @@ public static class OfficePathfinder2D
         }
 
         return smoothed;
+    }
+
+    private static bool HasClearLine(
+        OfficeGrid2D grid,
+        Vector2 from,
+        Vector2 to,
+        float workerRadius,
+        AIWorkerAgent requester)
+    {
+        if (!grid.HasBodyLineOfSight(from, to, workerRadius))
+            return false;
+
+        OfficeCrowdCoordinator2D crowd = OfficeCrowdCoordinator2D.Instance;
+        return crowd == null ||
+               (crowd.IsWorkerLineClear(from, to, workerRadius, requester) &&
+                crowd.IsInteractionLineClear(from, to, workerRadius, requester));
     }
 }
