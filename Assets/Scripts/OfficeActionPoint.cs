@@ -10,6 +10,14 @@ public enum OfficeActionType
     MeetingRoom
 }
 
+public enum OfficeFacingDirection
+{
+    Down,
+    Up,
+    Left,
+    Right
+}
+
 public class OfficeActionPoint : MonoBehaviour
 {
     public OfficeActionType actionType;
@@ -26,6 +34,12 @@ public class OfficeActionPoint : MonoBehaviour
 
     [Tooltip("For single-user points, offset the target away from the marker. Useful when the marker is centered on a desk but workers should stand beside it.")]
     public Vector2 singleUserTargetOffset = Vector2.zero;
+
+    [Tooltip("Direction the worker faces while standing on this point.")]
+    public OfficeFacingDirection facing = OfficeFacingDirection.Down;
+
+    [Tooltip("For multi-user points, facing direction per slot (index 0..capacity-1). Slots beyond this list use the default Facing above.")]
+    public List<OfficeFacingDirection> slotFacings = new List<OfficeFacingDirection>();
 
     [Header("Effects After Use")]
     public float energyChange = 0f;
@@ -115,6 +129,32 @@ public class OfficeActionPoint : MonoBehaviour
             return transform.position;
 
         return GetSlotPosition(slot, safeCapacity);
+    }
+
+    public Vector2 GetFacingVector()
+    {
+        return FacingToVector(facing);
+    }
+
+    public Vector2 GetFacingVector(AIWorkerAgent agent)
+    {
+        int safeCapacity = Mathf.Max(1, capacity);
+        if (agent != null && safeCapacity > 1 && reservedSlots.TryGetValue(agent, out int slot)
+            && slotFacings != null && slot >= 0 && slot < slotFacings.Count)
+            return FacingToVector(slotFacings[slot]);
+
+        return GetFacingVector();
+    }
+
+    private static Vector2 FacingToVector(OfficeFacingDirection dir)
+    {
+        switch (dir)
+        {
+            case OfficeFacingDirection.Up: return Vector2.up;
+            case OfficeFacingDirection.Left: return Vector2.left;
+            case OfficeFacingDirection.Right: return Vector2.right;
+            default: return Vector2.down;
+        }
     }
 
     private Vector2 GetSlotPosition(int slot, int safeCapacity)
@@ -542,13 +582,26 @@ public class OfficeActionPoint : MonoBehaviour
         int safeCapacity = Mathf.Max(1, capacity);
         if (safeCapacity > 1)
         {
-            Gizmos.color = Color.cyan;
             for (int slot = 0; slot < safeCapacity; slot++)
             {
                 float angle = slot * (Mathf.PI * 2f / safeCapacity);
                 Vector2 offset = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * multiUserSlotRadius;
-                Gizmos.DrawWireSphere((Vector2)transform.position + offset, 0.12f);
+                Vector2 slotPos = (Vector2)transform.position + offset;
+
+                Gizmos.color = Color.cyan;
+                Gizmos.DrawWireSphere(slotPos, 0.12f);
+
+                Gizmos.color = Color.blue;
+                Vector2 dir = slotFacings != null && slot < slotFacings.Count
+                    ? FacingToVector(slotFacings[slot])
+                    : GetFacingVector();
+                Gizmos.DrawLine(slotPos, slotPos + dir * 0.3f);
             }
+        }
+        else
+        {
+            Gizmos.color = Color.blue;
+            Gizmos.DrawLine(transform.position, (Vector2)transform.position + GetFacingVector() * 0.4f);
         }
     }
 }

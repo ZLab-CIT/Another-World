@@ -1,5 +1,5 @@
 fileFormatVersion: 2
-guid: 5242625b6c118af4f85d06ee57b79519
+guid: 9e97092a0fd91f14682446665e1791e8
 TextureImporter:
   internalIDToNameTable: []
   externalObjects: {}
@@ -123,274 +123,316 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: tables_0
+      name: agent2_sitting_0
       rect:
         serializedVersion: 2
-        x: 23
-        y: 744
-        width: 181
+        x: 213
+        y: 607
+        width: 238
+        height: 359
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 3d7bc59358fe4fd4086421620c7e5655
+      internalID: -2066324798
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: agent2_sitting_1
+      rect:
+        serializedVersion: 2
+        x: 598
+        y: 608
+        width: 243
+        height: 354
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: a90cc05192dec4347a1e8e86bcf3fbb9
+      internalID: -356668557
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: agent2_sitting_2
+      rect:
+        serializedVersion: 2
+        x: 1008
+        y: 608
+        width: 243
+        height: 360
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: bd49d694455800846bbb4e9ad5fb6ae8
+      internalID: 55783928
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: agent2_sitting_3
+      rect:
+        serializedVersion: 2
+        x: 215
+        y: 152
+        width: 261
+        height: 350
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 3e3a2bd2ca4cee54ea1f11046659faca
+      internalID: -598990741
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: agent2_sitting_4
+      rect:
+        serializedVersion: 2
+        x: 615
+        y: 152
+        width: 234
+        height: 354
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 7ca555babd5b0be46be93b16b99d63cc
+      internalID: -1760065307
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: agent2_sitting_5
+      rect:
+        serializedVersion: 2
+        x: 1007
+        y: 150
+        width: 241
+        height: 356
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 85dbd5367c6248045b6b12673d171162
+      internalID: -1681559267
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: agent2_sitting_6
+      rect:
+        serializedVersion: 2
+        x: 213
+        y: 607
+        width: 238
+        height: 78
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 390ca3000774b0e4695c3b715c47f309
+      internalID: 1151346988
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: agent2_sitting_7
+      rect:
+        serializedVersion: 2
+        x: 213
+        y: 685
+        width: 238
+        height: 281
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 58f8ae1aaaf62204aa441c6d7f045866
+      internalID: -2137911434
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: agent2_sitting_8
+      rect:
+        serializedVersion: 2
+        x: 215
+        y: 152
+        width: 261
+        height: 350
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 6752ce057ba2bc94d8b01038111b8f8e
+      internalID: -971039927
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: agent2_sitting_9
+      rect:
+        serializedVersion: 2
+        x: 215
+        y: 239
+        width: 261
+        height: 263
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 0e292acb087893340a145d313f1dd3cf
+      internalID: -1968415693
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: agent2_sitting_10
+      rect:
+        serializedVersion: 2
+        x: 215
+        y: 152
+        width: 261
+        height: 87
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: ff1612b72472af24db032c34d92c352d
+      internalID: -2098037795
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: agent2_sitting_11
+      rect:
+        serializedVersion: 2
+        x: 615
+        y: 152
+        width: 234
+        height: 81
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 8a849180217ea9b459205ad162650da1
+      internalID: 1391163197
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: agent2_sitting_12
+      rect:
+        serializedVersion: 2
+        x: 615
+        y: 233
+        width: 234
         height: 273
       alignment: 0
-      pivot: {x: 0.5, y: 0.5}
+      pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
       outline: []
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: d683d40e2d0e4244585edaed32c61ea6
-      internalID: 1105651057
+      spriteID: 150235e6e495b2d48ba395806d824076
+      internalID: -960118251
       vertices: []
       indices: 
       edges: []
       weights: []
     - serializedVersion: 2
-      name: tables_1
+      name: agent2_sitting_13
       rect:
         serializedVersion: 2
-        x: 313
-        y: 741
-        width: 178
-        height: 293
+        x: 1007
+        y: 150
+        width: 241
+        height: 82
       alignment: 0
-      pivot: {x: 0.5, y: 0.5}
+      pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
       outline: []
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: 8b15638629cdc3b4e9c730a5e8a149ec
-      internalID: 562245282
+      spriteID: f53e6c10fb590384580df47748d15c32
+      internalID: 1035437601
       vertices: []
       indices: 
       edges: []
       weights: []
     - serializedVersion: 2
-      name: tables_2
+      name: agent2_sitting_14
       rect:
         serializedVersion: 2
-        x: 634
-        y: 717
-        width: 172
-        height: 338
+        x: 1007
+        y: 232
+        width: 241
+        height: 274
       alignment: 0
-      pivot: {x: 0.5, y: 0.5}
+      pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
       outline: []
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: 93d52754ee0e41f4db3c024d11be6e86
-      internalID: 2013090715
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: tables_3
-      rect:
-        serializedVersion: 2
-        x: 927
-        y: 704
-        width: 202
-        height: 360
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: 31dff44f148f42540bc8d493465d8b0f
-      internalID: 518587346
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: tables_4
-      rect:
-        serializedVersion: 2
-        x: 1223
-        y: 703
-        width: 203
-        height: 360
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: f96be7d19c4987249ba9655c2ae7b0a8
-      internalID: 26231053
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: tables_5
-      rect:
-        serializedVersion: 2
-        x: 9
-        y: 335
-        width: 283
-        height: 299
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: 72b28ba0081ea754b943950331c52981
-      internalID: 1875528007
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: tables_6
-      rect:
-        serializedVersion: 2
-        x: 380
-        y: 336
-        width: 279
-        height: 298
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: be53aca89f1f76c4d9f6fe6fd2e9de22
-      internalID: -1276670582
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: tables_7
-      rect:
-        serializedVersion: 2
-        x: 755
-        y: 330
-        width: 281
-        height: 298
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: 70e7c337c2c3bb14a939bfe88a002cf3
-      internalID: -1751840651
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: tables_8
-      rect:
-        serializedVersion: 2
-        x: 1134
-        y: 328
-        width: 285
-        height: 302
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: cc1205157a02ee7429ae5bdfe932ab32
-      internalID: 848314327
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: tables_9
-      rect:
-        serializedVersion: 2
-        x: 224
-        y: 32
-        width: 267
-        height: 241
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: a1d46b4274fb7c34c8b6ba0336816f1b
-      internalID: -748077670
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: tables_10
-      rect:
-        serializedVersion: 2
-        x: 636
-        y: 33
-        width: 183
-        height: 179
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: cb5bc946e9857204b8dca45eabede590
-      internalID: 173512407
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: tables_11
-      rect:
-        serializedVersion: 2
-        x: 1269
-        y: 703
-        width: 115
-        height: 360
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: f5cc7c2524f96f84c8070e87e557316e
-      internalID: 788579139
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: tables_12
-      rect:
-        serializedVersion: 2
-        x: 974
-        y: 704
-        width: 113
-        height: 360
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: 53af865bc5bd93044b24c29d4166a3e5
-      internalID: 925248781
+      spriteID: ab13a69c32c687b408a08ab17386c6d5
+      internalID: 24605902
       vertices: []
       indices: 
       edges: []
@@ -406,19 +448,21 @@ TextureImporter:
     weights: []
     secondaryTextures: []
     nameFileIdTable:
-      tables_0: 1105651057
-      tables_1: 562245282
-      tables_10: 173512407
-      tables_11: 788579139
-      tables_12: 925248781
-      tables_2: 2013090715
-      tables_3: 518587346
-      tables_4: 26231053
-      tables_5: 1875528007
-      tables_6: -1276670582
-      tables_7: -1751840651
-      tables_8: 848314327
-      tables_9: -748077670
+      agent2_sitting_0: -2066324798
+      agent2_sitting_1: -356668557
+      agent2_sitting_10: -2098037795
+      agent2_sitting_11: 1391163197
+      agent2_sitting_12: -960118251
+      agent2_sitting_13: 1035437601
+      agent2_sitting_14: 24605902
+      agent2_sitting_2: 55783928
+      agent2_sitting_3: -598990741
+      agent2_sitting_4: -1760065307
+      agent2_sitting_5: -1681559267
+      agent2_sitting_6: 1151346988
+      agent2_sitting_7: -2137911434
+      agent2_sitting_8: -971039927
+      agent2_sitting_9: -1968415693
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

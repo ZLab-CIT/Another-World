@@ -84,6 +84,8 @@ public class AIWorkerAgent : MonoBehaviour
     private readonly List<Vector2> actionApproachWaypoints = new List<Vector2>();
     private OfficeActionPoint departureAction;
     private float departureActionExpiresAt;
+    private OfficeActionPoint lastFinishedDesk;
+    private bool stillSeated;
 
     [SerializeField] private Animator anim;
     private Vector2 lastFacing = Vector2.down;
@@ -320,6 +322,15 @@ public class AIWorkerAgent : MonoBehaviour
         }
 
         currentAction = bestAction;
+
+        if (stillSeated && bestAction == lastFinishedDesk)
+        {
+            stillSeated = false;
+            StartActing();
+            return;
+        }
+
+        stillSeated = false;
         state = WorkerState.Planning;
     }
 
@@ -541,6 +552,9 @@ public class AIWorkerAgent : MonoBehaviour
         pathIndex = 0;
         state = WorkerState.Acting;
         stateTimer = currentAction != null ? currentAction.useTime : 1f;
+
+        if (currentAction != null)
+            lastFacing = currentAction.GetFacingVector(this);
     }
 
     private void FinishAction()
@@ -554,6 +568,13 @@ public class AIWorkerAgent : MonoBehaviour
             currentAction.HoldDepartingAgent(this, departureHoldSeconds);
             departureAction = finishedAction;
             departureActionExpiresAt = Time.time + departureHoldSeconds;
+
+            if (finishedAction.actionType == OfficeActionType.WorkDesk)
+            {
+                lastFinishedDesk = finishedAction;
+                stillSeated = true;
+            }
+
             currentAction = null;
         }
 
@@ -652,5 +673,18 @@ public class AIWorkerAgent : MonoBehaviour
         anim.SetBool("IsMoving", isMoving);
         anim.SetFloat("MoveX", lastFacing.x);
         anim.SetFloat("MoveY", lastFacing.y);
+
+        if (stillSeated && lastFinishedDesk != null)
+        {
+            Vector2 deskTarget = lastFinishedDesk.GetTargetPosition(this);
+            if (Vector2.Distance(GetPosition(), deskTarget) > slotCommitRadius)
+                stillSeated = false;
+        }
+
+        bool isSitting = stillSeated
+            || (state == WorkerState.Acting
+                && currentAction != null
+                && currentAction.actionType == OfficeActionType.WorkDesk);
+        anim.SetBool("IsSitting", isSitting);
     }
 }
