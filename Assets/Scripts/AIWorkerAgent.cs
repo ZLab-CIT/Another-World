@@ -15,6 +15,10 @@ public class AIWorkerAgent : MonoBehaviour
         Replanning
     }
 
+    [Header("Identity")]
+    [Tooltip("Matches a HatPool.agentType in the HatCatalogSO. Agents with no matching pool are skipped by hat events.")]
+    public string agentType = "";
+
     [Header("References")]
     public OfficeGrid2D grid;
 
@@ -88,7 +92,21 @@ public class AIWorkerAgent : MonoBehaviour
     private bool stillSeated;
 
     [SerializeField] private Animator anim;
+    [SerializeField] private Transform hatAnchor;
+    [SerializeField] private Vector3 defaultHatAnchorLocalPosition = new Vector3(0f, 0.5f, 0f);
     private Vector2 lastFacing = Vector2.down;
+    private GameObject currentHat;
+    private Transform runtimeHatAnchor;
+    private Vector3 currentHatStandingOffset;
+    private Vector3 currentHatSittingOffset;
+    private bool lastHatSittingState;
+
+    private float speedBuffMultiplier = 1f;
+    private float speedBuffUntil = -1f;
+    private float energyDecayMult = 1f;
+    private float focusDecayMult = 1f;
+    private float socialDecayMult = 1f;
+    private float decayOverrideUntil = -1f;
 
     public OfficeGrid2D Grid => grid;
     public Vector2 CurrentVelocity => motor != null ? motor.Velocity : Vector2.zero;
@@ -125,6 +143,8 @@ public class AIWorkerAgent : MonoBehaviour
 
         if (anim == null)
             anim = GetComponentInChildren<Animator>();
+
+        EnsureAgentType();
 
         crowd = OfficeCrowdCoordinator2D.Ensure();
         crowd.Register(this);
@@ -262,12 +282,16 @@ public class AIWorkerAgent : MonoBehaviour
 
     private void TickNeeds(float deltaTime)
     {
-        energy = Mathf.Clamp(energy - energyDecay * deltaTime, 0f, 100f);
-        focus = Mathf.Clamp(focus - focusDecay * deltaTime, 0f, 100f);
-        social = Mathf.Clamp(social - socialDecay * deltaTime, 0f, 100f);
+        bool decayOverridden = Time.time < decayOverrideUntil;
+        float energyRate = decayOverridden ? energyDecay * energyDecayMult : energyDecay;
+        float focusRate = decayOverridden ? focusDecay * focusDecayMult : focusDecay;
+        float socialRate = decayOverridden ? socialDecay * socialDecayMult : socialDecay;
+        energy = Mathf.Clamp(energy - energyRate * deltaTime, 0f, 100f);
+        focus = Mathf.Clamp(focus - focusRate * deltaTime, 0f, 100f);
+        social = Mathf.Clamp(social - socialRate * deltaTime, 0f, 100f);
     }
 
-    private void RefreshActionPoints()
+    public void RefreshActionPoints()
     {
 #if UNITY_2023_1_OR_NEWER
         actionPoints = FindObjectsByType<OfficeActionPoint>(FindObjectsSortMode.None);
@@ -501,7 +525,7 @@ public class AIWorkerAgent : MonoBehaviour
             nearSlotTimer = 0f;
         }
 
-        bool moved = motor.MoveToward(this, grid, crowd, target, avoidanceRadius, speed, Time.deltaTime);
+        bool moved = motor.MoveToward(this, grid, crowd, target, avoidanceRadius, speed * EffectiveSpeedMultiplier, Time.deltaTime);
         TrackStuck(moved);
     }
 
@@ -653,6 +677,149 @@ public class AIWorkerAgent : MonoBehaviour
         productivity = Mathf.Max(0f, productivity + productivityChange);
     }
 
+    public float EffectiveSpeedMultiplier
+    {
+        get { return Time.time < speedBuffUntil ? speedBuffMultiplier : 1f; }
+    }
+
+    public void ApplySpeedBuff(float multiplier, float duration)
+    {
+        if (duration <= 0f)
+            return;
+
+        speedBuffMultiplier = Mathf.Max(0f, multiplier);
+        speedBuffUntil = Time.time + duration;
+    }
+
+    public void ApplyDecayOverride(float energyMult, float focusMult, float socialMult, float duration)
+    {
+        if (duration <= 0f)
+            return;
+
+        energyDecayMult = Mathf.Max(0f, energyMult);
+        focusDecayMult = Mathf.Max(0f, focusMult);
+        socialDecayMult = Mathf.Max(0f, socialMult);
+        decayOverrideUntil = Time.time + duration;
+    }
+
+    public void ApplyCosmeticTint(Color tint)
+    {
+        SpriteRenderer[] renderers = GetComponentsInChildren<SpriteRenderer>();
+        foreach (SpriteRenderer renderer in renderers)
+            renderer.color = tint;
+    }
+
+    private void EnsureAgentType()
+    {
+        if (!string.IsNullOrEmpty(agentType))
+            return;
+
+        Transform visualRoot = anim != null ? anim.transform : transform;
+        SpriteRenderer renderer = visualRoot.GetComponentInChildren<SpriteRenderer>();
+        if (renderer == null || renderer.sprite == null)
+            return;
+
+        string spriteName = renderer.sprite.name;
+        int separator = spriteName.IndexOf('_');
+        agentType = separator > 0 ? spriteName.Substring(0, separator) : spriteName;
+    }
+
+    public void ApplyHat(Sprite hatSprite, Vector3 localOffset, Vector3 sittingLocalOffset, Vector3 localScale)
+    {
+        if (hatSprite == null)
+            return;
+
+        Transform visualRoot = anim != null ? anim.transform : transform;
+        Transform host = ResolveHatHost(visualRoot);
+
+        if (currentHat != null)
+            Destroy(currentHat);
+
+        currentHatStandingOffset = localOffset;
+        currentHatSittingOffset = sittingLocalOffset;
+        lastHatSittingState = IsCurrentlySitting();
+
+        SpriteRenderer bodyRenderer = visualRoot.GetComponentInChildren<SpriteRenderer>();
+
+        currentHat = new GameObject("Hat");
+        currentHat.transform.SetParent(host, false);
+        currentHat.transform.localPosition = CurrentHatOffset();
+        currentHat.transform.localScale = localScale;
+
+        SpriteRenderer sr = currentHat.AddComponent<SpriteRenderer>();
+        sr.sprite = hatSprite;
+        sr.color = Color.white;
+        if (bodyRenderer != null)
+        {
+            sr.sortingLayerID = bodyRenderer.sortingLayerID;
+            sr.sortingOrder = bodyRenderer.sortingOrder + 20;
+        }
+        else
+        {
+            sr.sortingOrder = 100;
+        }
+    }
+
+    private Vector3 CurrentHatOffset()
+    {
+        return IsCurrentlySitting() ? currentHatSittingOffset : currentHatStandingOffset;
+    }
+
+    private void UpdateHatPlacement(bool isSitting)
+    {
+        if (currentHat == null && isSitting == lastHatSittingState)
+            return;
+
+        lastHatSittingState = isSitting;
+
+        if (currentHat != null)
+            currentHat.transform.localPosition = isSitting ? currentHatSittingOffset : currentHatStandingOffset;
+    }
+
+    private bool IsCurrentlySitting()
+    {
+        return stillSeated || (state == WorkerState.Acting && currentAction != null && currentAction.actionType == OfficeActionType.WorkDesk);
+    }
+
+    private Transform ResolveHatHost(Transform visualRoot)
+    {
+        if (hatAnchor != null)
+            return hatAnchor;
+
+        Transform found = FindChildRecursive(visualRoot, "HatAnchor");
+        if (found != null)
+            return found;
+
+        if (runtimeHatAnchor == null)
+        {
+            GameObject anchorObject = new GameObject("HatAnchor");
+            runtimeHatAnchor = anchorObject.transform;
+            runtimeHatAnchor.SetParent(visualRoot, false);
+            runtimeHatAnchor.localPosition = defaultHatAnchorLocalPosition;
+        }
+
+        return runtimeHatAnchor;
+    }
+
+    private static Transform FindChildRecursive(Transform root, string childName)
+    {
+        if (root == null)
+            return null;
+
+        for (int i = 0; i < root.childCount; i++)
+        {
+            Transform child = root.GetChild(i);
+            if (child.name == childName)
+                return child;
+
+            Transform nested = FindChildRecursive(child, childName);
+            if (nested != null)
+                return nested;
+        }
+
+        return null;
+    }
+
     private void UpdateAnimation()
     {
         if (anim == null || motor == null)
@@ -681,10 +848,8 @@ public class AIWorkerAgent : MonoBehaviour
                 stillSeated = false;
         }
 
-        bool isSitting = stillSeated
-            || (state == WorkerState.Acting
-                && currentAction != null
-                && currentAction.actionType == OfficeActionType.WorkDesk);
+        bool isSitting = IsCurrentlySitting();
         anim.SetBool("IsSitting", isSitting);
+        UpdateHatPlacement(isSitting);
     }
 }

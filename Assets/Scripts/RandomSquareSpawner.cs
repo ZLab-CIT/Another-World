@@ -22,8 +22,40 @@ public class RandomSquareSpawner : MonoBehaviour
     [Tooltip("World scale applied to spawned sprites (1 = natural sprite size).")]
     [SerializeField] private float objectScale = 1f;
 
+    private void Start()
+    {
+        VendingEventDispatcher.Ensure();
+    }
+
+    public void TriggerGacha()
+    {
+        VendingEventDispatcher dispatcher = VendingEventDispatcher.Instance;
+        if (dispatcher == null)
+            dispatcher = VendingEventDispatcher.Ensure();
+        if (dispatcher != null)
+            dispatcher.TriggerGachaEvent();
+    }
+
+    public void TriggerHat()
+    {
+        VendingEventDispatcher dispatcher = VendingEventDispatcher.Instance;
+        if (dispatcher == null)
+            dispatcher = VendingEventDispatcher.Ensure();
+        if (dispatcher != null)
+            dispatcher.TriggerHatEvent();
+    }
+
     public void ShowRandomSquare()
     {
+        VendingEventDispatcher dispatcher = VendingEventDispatcher.Instance;
+        if (dispatcher == null)
+            dispatcher = VendingEventDispatcher.Ensure();
+        if (dispatcher != null)
+        {
+            dispatcher.TriggerBuffEvent();
+            return;
+        }
+
         Camera camera = Camera.main;
         if (camera == null)
             return;
