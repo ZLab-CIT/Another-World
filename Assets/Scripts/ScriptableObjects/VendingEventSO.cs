@@ -21,7 +21,55 @@ public enum VendingCosmeticType
     AgentTint,
     FurnitureUnlock,
     ConfettiBurst,
-    AgentHat
+    AgentHat,
+    DiscoDance
+}
+
+public enum UpgradeableFurnitureKind
+{
+    Plant,
+    CoffeeMachine,
+    Lounge
+}
+
+public enum InteractionDirection
+{
+    PhysicalToVirtual,
+    VirtualToPhysical,
+    Bidirectional
+}
+
+public enum PhysicalEventType
+{
+    Sale,
+    Restock,
+    CouponRedeemed
+}
+
+public enum OfflineRewardType
+{
+    None,
+    DiscountCoupon,
+    FreeItemCoupon,
+    BonusCredit
+}
+
+[System.Serializable]
+public struct PhysicalInteractionEvent
+{
+    public PhysicalEventType eventType;
+    public string productId;
+    public string userId;
+    public string sourceId;
+}
+
+[System.Serializable]
+public struct OfflineCouponReward
+{
+    public OfflineRewardType rewardType;
+    public string couponId;
+    public string displayName;
+    public string description;
 }
 
 [CreateAssetMenu(menuName = "ZhipuOffice/Vending Event", fileName = "NewVendingEvent")]
@@ -35,6 +83,8 @@ public class VendingEventSO : ScriptableObject
 
     [Header("World Drop")]
     public Sprite dropSprite;
+    [Tooltip("Optional random pool for temporary vending drops. If not empty, one sprite is selected per event.")]
+    public Sprite[] dropSprites;
     public float dropLifetime = 3f;
     public float dropScale = 1f;
 
@@ -76,6 +126,11 @@ public class VendingEventSO : ScriptableObject
     public Color agentTint = Color.white;
     [Tooltip("Optional prefab (with an OfficeActionPoint) for FurnitureUnlock. If empty, a placeholder is spawned.")]
     public GameObject furniturePrefab;
+    [Tooltip("Optional random pool for decoration/furniture sprites.")]
+    public Sprite[] furnitureSprites;
+    public UpgradeableFurnitureKind furnitureKind = UpgradeableFurnitureKind.Plant;
+    [Tooltip("Named socket used for deterministic placement, e.g. PlantCorner or LoungeUpgrade.")]
+    public string furnitureSocketId;
     [Tooltip("Number of confetti pieces for ConfettiBurst.")]
     public int confettiCount = 24;
     public float confettiDuration = 1.2f;
@@ -85,4 +140,13 @@ public class VendingEventSO : ScriptableObject
     [Header("Presentation")]
     [Tooltip("How long the announcement banner is shown before the effect is applied.")]
     public float announceDuration = 1.5f;
+
+    [Header("Physical / Virtual Interaction")]
+    public InteractionDirection interactionDirection = InteractionDirection.PhysicalToVirtual;
+    [Tooltip("Physical vending-machine product id that can trigger this virtual event.")]
+    public string physicalProductId;
+    [Tooltip("Default offline user used by prototype rewards if no user id is supplied.")]
+    public string targetUserId = "user_001";
+    [Tooltip("Coupon or reward produced when this event completes a bidirectional loop.")]
+    public OfflineCouponReward offlineReward;
 }

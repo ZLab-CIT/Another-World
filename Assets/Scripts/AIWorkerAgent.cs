@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -107,6 +108,7 @@ public class AIWorkerAgent : MonoBehaviour
     private float focusDecayMult = 1f;
     private float socialDecayMult = 1f;
     private float decayOverrideUntil = -1f;
+    private Coroutine danceRoutine;
 
     public OfficeGrid2D Grid => grid;
     public Vector2 CurrentVelocity => motor != null ? motor.Velocity : Vector2.zero;
@@ -599,6 +601,10 @@ public class AIWorkerAgent : MonoBehaviour
                 stillSeated = true;
             }
 
+            PhysicalVirtualInteractionBridge bridge = PhysicalVirtualInteractionBridge.Instance;
+            if (bridge != null)
+                bridge.EvaluateProductivityMilestone();
+
             currentAction = null;
         }
 
@@ -675,6 +681,10 @@ public class AIWorkerAgent : MonoBehaviour
         focus = Mathf.Clamp(focus + focusChange, 0f, 100f);
         social = Mathf.Clamp(social + socialChange, 0f, 100f);
         productivity = Mathf.Max(0f, productivity + productivityChange);
+
+        PhysicalVirtualInteractionBridge bridge = PhysicalVirtualInteractionBridge.Instance;
+        if (bridge != null)
+            bridge.EvaluateProductivityMilestone();
     }
 
     public float EffectiveSpeedMultiplier
@@ -707,6 +717,42 @@ public class AIWorkerAgent : MonoBehaviour
         SpriteRenderer[] renderers = GetComponentsInChildren<SpriteRenderer>();
         foreach (SpriteRenderer renderer in renderers)
             renderer.color = tint;
+    }
+
+    public void StartDance(float duration)
+    {
+        if (duration <= 0f)
+            return;
+
+        if (danceRoutine != null)
+            StopCoroutine(danceRoutine);
+
+        danceRoutine = StartCoroutine(DanceRoutine(duration));
+    }
+
+    private IEnumerator DanceRoutine(float duration)
+    {
+        Transform visualRoot = anim != null ? anim.transform : transform;
+        Vector3 baseLocalPosition = visualRoot.localPosition;
+        Vector3 baseLocalScale = visualRoot.localScale;
+
+        float elapsed = 0f;
+        float phase = Random.Range(0f, Mathf.PI * 2f);
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float beat = Mathf.Sin((elapsed * 9f) + phase);
+            float side = Mathf.Sin((elapsed * 5.5f) + phase);
+            visualRoot.localPosition = baseLocalPosition + new Vector3(side * 0.045f, Mathf.Abs(beat) * 0.09f, 0f);
+            visualRoot.localScale = baseLocalScale * (1f + Mathf.Abs(beat) * 0.08f);
+
+            yield return null;
+        }
+
+        visualRoot.localPosition = baseLocalPosition;
+        visualRoot.localScale = baseLocalScale;
+
+        danceRoutine = null;
     }
 
     private void EnsureAgentType()

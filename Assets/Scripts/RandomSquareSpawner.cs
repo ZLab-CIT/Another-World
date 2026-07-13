@@ -25,34 +25,44 @@ public class RandomSquareSpawner : MonoBehaviour
     private void Start()
     {
         VendingEventDispatcher.Ensure();
+        PhysicalVirtualInteractionBridge.Ensure();
     }
 
     public void TriggerGacha()
     {
-        VendingEventDispatcher dispatcher = VendingEventDispatcher.Instance;
-        if (dispatcher == null)
-            dispatcher = VendingEventDispatcher.Ensure();
-        if (dispatcher != null)
-            dispatcher.TriggerGachaEvent();
+        PhysicalVirtualInteractionBridge bridge = PhysicalVirtualInteractionBridge.Instance;
+        if (bridge == null)
+            bridge = PhysicalVirtualInteractionBridge.Ensure();
+        if (bridge != null)
+            bridge.TriggerMockGachaSale();
     }
 
     public void TriggerHat()
     {
-        VendingEventDispatcher dispatcher = VendingEventDispatcher.Instance;
-        if (dispatcher == null)
-            dispatcher = VendingEventDispatcher.Ensure();
-        if (dispatcher != null)
-            dispatcher.TriggerHatEvent();
+        PhysicalVirtualInteractionBridge bridge = PhysicalVirtualInteractionBridge.Instance;
+        if (bridge == null)
+            bridge = PhysicalVirtualInteractionBridge.Ensure();
+        if (bridge != null)
+            bridge.TriggerMockGachaSale();
+    }
+
+    public void TriggerOnlineMilestone()
+    {
+        PhysicalVirtualInteractionBridge bridge = PhysicalVirtualInteractionBridge.Instance;
+        if (bridge == null)
+            bridge = PhysicalVirtualInteractionBridge.Ensure();
+        if (bridge != null)
+            bridge.TriggerMockOnlineMilestone();
     }
 
     public void ShowRandomSquare()
     {
-        VendingEventDispatcher dispatcher = VendingEventDispatcher.Instance;
-        if (dispatcher == null)
-            dispatcher = VendingEventDispatcher.Ensure();
-        if (dispatcher != null)
+        PhysicalVirtualInteractionBridge bridge = PhysicalVirtualInteractionBridge.Instance;
+        if (bridge == null)
+            bridge = PhysicalVirtualInteractionBridge.Ensure();
+        if (bridge != null)
         {
-            dispatcher.TriggerBuffEvent();
+            bridge.TriggerMockPhysicalSale();
             return;
         }
 

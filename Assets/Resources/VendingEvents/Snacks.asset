@@ -1,0 +1,61 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c54ae0910535e5543bd021d5ce8d01fb, type: 3}
+  m_Name: Snacks
+  m_EditorClassIdentifier: 
+  eventId: vending_drop
+  displayName: Vending Event
+  description: Something happened in the office.
+  icon: {fileID: 0}
+  dropSprite: {fileID: 0}
+  dropSprites:
+  - {fileID: -504773420, guid: 70de415ca7c15e9479d8687d514145b8, type: 3}
+  - {fileID: -1398231018, guid: 70de415ca7c15e9479d8687d514145b8, type: 3}
+  - {fileID: -695260843, guid: 70de415ca7c15e9479d8687d514145b8, type: 3}
+  - {fileID: 943850889, guid: 70de415ca7c15e9479d8687d514145b8, type: 3}
+  dropLifetime: 4
+  dropScale: 0.65
+  scope: 0
+  nearbyRadius: 2
+  energyChange: 0
+  focusChange: 0
+  socialChange: 0
+  productivityChange: 0
+  speedMultiplier: 1
+  speedBuffDuration: 0
+  energyDecayMultiplier: 1
+  focusDecayMultiplier: 1
+  socialDecayMultiplier: 1
+  decayOverrideDuration: 0
+  postEnergyChange: 0
+  postFocusChange: 0
+  postSocialChange: 0
+  postProductivityChange: 0
+  rarity: 0
+  cosmeticType: 0
+  agentTint: {r: 1, g: 1, b: 1, a: 1}
+  furniturePrefab: {fileID: 0}
+  furnitureSprites: []
+  furnitureKind: 0
+  furnitureSocketId: 
+  confettiCount: 24
+  confettiDuration: 1.2
+  confettiSprite: {fileID: 0}
+  announceDuration: 1.5
+  interactionDirection: 0
+  physicalProductId: 
+  targetUserId: user_001
+  offlineReward:
+    rewardType: 0
+    couponId: 
+    displayName: 
+    description: 
