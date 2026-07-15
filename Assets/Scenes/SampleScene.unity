@@ -459,6 +459,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   agentType: agent6
+  agentId: 
+  displayName: Pengpeng
+  personality: Cute romantic person, like watching videos, hard working, like helping
+    people, good in cooking
   grid: {fileID: 1054333570}
   assignedDesk: {fileID: 568197847}
   speed: 1.6
@@ -481,6 +485,12 @@ MonoBehaviour:
   stuckMoveThreshold: 0.08
   replanCooldown: 0.8
   reservedLookaheadPoints: 5
+  useLLMBrain: 1
+  brainDecisionInterval: 20
+  brainDirectiveTtl: 30
+  logBrainDecisions: 0
+  showThoughtBubble: 1
+  thoughtBubble: {fileID: 0}
   anim: {fileID: 0}
   hatAnchor: {fileID: 536113059}
   defaultHatAnchorLocalPosition: {x: 0, y: 0.5, z: 0}
@@ -859,6 +869,65 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!1 &336801965
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 336801966}
+  - component: {fileID: 336801967}
+  m_Layer: 0
+  m_Name: VendingMachine
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &336801966
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 336801965}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -6.46, y: 3.8, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 471185857}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &336801967
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 336801965}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7ba2eca74f4291d458bc8ab1b4c6d389, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  shakeTarget: {fileID: 0}
+  dispenseOffset: {x: 0, y: -0.5}
+  fallDistance: 0.35
+  shakeDuration: 0.3
+  shakeAngle: 5
+  shakeFrequency: 38
+  productScaleMultiplier: 0.3
+  popDuration: 0.16
+  ejectUpVelocity: 0.9
+  gravity: -9
+  landSquash: 0.35
+  landRecoverDuration: 0.12
+  fadeDuration: 0.4
+  productSortingOrder: 60
 --- !u!1 &343794770
 GameObject:
   m_ObjectHideFlags: 0
@@ -884,7 +953,7 @@ Transform:
   m_GameObject: {fileID: 343794770}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -7.06, y: 3.94, z: 0}
+  m_LocalPosition: {x: -4.8, y: 3.94, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1159,6 +1228,90 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!1 &471185856
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 471185857}
+  - component: {fileID: 471185858}
+  m_Layer: 0
+  m_Name: Sprite
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &471185857
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 471185856}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 0.6, y: 0.6, z: 0.6}
+  m_ConstrainProportionsScale: 1
+  m_Children: []
+  m_Father: {fileID: 336801966}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!212 &471185858
+SpriteRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 471185856}
+  m_Enabled: 1
+  m_CastShadows: 0
+  m_ReceiveShadows: 0
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 0
+  m_RayTraceProcedural: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: 2100000, guid: a97c105638bdf8b4a8650670310a4cd3, type: 2}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 0
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 5
+  m_Sprite: {fileID: -234160244, guid: 4c62d8654d8eb8b4cb9a313cf1829d57, type: 3}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_FlipX: 0
+  m_FlipY: 0
+  m_DrawMode: 0
+  m_Size: {x: 1.43, y: 2.37}
+  m_AdaptiveModeThreshold: 0.5
+  m_SpriteTileMode: 0
+  m_WasSpriteAssigned: 1
+  m_MaskInteraction: 0
+  m_SpriteSortPoint: 0
 --- !u!1 &473882585
 GameObject:
   m_ObjectHideFlags: 0
@@ -1388,6 +1541,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   agentType: agent1
+  agentId: 
+  displayName: XiaoXia
+  personality: HR in company, has 2 brothers, speaks 5 languages, really likes talking
+    to people and reading books
   grid: {fileID: 1054333570}
   assignedDesk: {fileID: 1332656399}
   speed: 2
@@ -1410,6 +1567,12 @@ MonoBehaviour:
   stuckMoveThreshold: 0.08
   replanCooldown: 0.8
   reservedLookaheadPoints: 5
+  useLLMBrain: 1
+  brainDecisionInterval: 20
+  brainDirectiveTtl: 30
+  logBrainDecisions: 1
+  showThoughtBubble: 1
+  thoughtBubble: {fileID: 0}
   anim: {fileID: 0}
   hatAnchor: {fileID: 1630713341}
   defaultHatAnchorLocalPosition: {x: 0, y: 0.5, z: 0}
@@ -2585,6 +2748,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   agentType: 
+  agentId: 
+  displayName: Mingyun
+  personality: Really good programmer, likes playing and developing games, open-minded
+    but sometimes can be shy, lives with dog
   grid: {fileID: 1054333570}
   assignedDesk: {fileID: 1375734823}
   speed: 1.6
@@ -2607,6 +2774,12 @@ MonoBehaviour:
   stuckMoveThreshold: 0.08
   replanCooldown: 0.8
   reservedLookaheadPoints: 5
+  useLLMBrain: 1
+  brainDecisionInterval: 20
+  brainDirectiveTtl: 30
+  logBrainDecisions: 1
+  showThoughtBubble: 1
+  thoughtBubble: {fileID: 0}
   anim: {fileID: 0}
   hatAnchor: {fileID: 0}
   defaultHatAnchorLocalPosition: {x: 0, y: 0.5, z: 0}
@@ -3550,7 +3723,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   actionType: 3
-  useTime: 4
+  useTime: 12
   baseScore: 5
   capacity: 3
   multiUserSlotRadius: 0.5
@@ -3720,6 +3893,60 @@ Animator:
   m_AllowConstantClipSamplingOptimization: 1
   m_KeepAnimatorStateOnDisable: 0
   m_WriteDefaultValuesOnDisable: 0
+--- !u!1 &966885345
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 966885347}
+  - component: {fileID: 966885346}
+  m_Layer: 0
+  m_Name: LLMBrainService
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &966885346
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 966885345}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8e58a2205992d704faa102cc9bc51a0c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  baseUrl: http://localhost:11434/v1
+  apiKey: 
+  model: qwen2.5:1.5b
+  temperature: 0.8
+  maxTokens: 64
+  requestTimeoutSeconds: 60
+  memoryLines: 4
+  enableSocialReplies: 1
+  maxConcurrentRequests: 1
+  personalities: []
+--- !u!4 &966885347
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 966885345}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &989669624
 GameObject:
   m_ObjectHideFlags: 0
@@ -4240,6 +4467,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   agentType: agent5
+  agentId: 
+  displayName: Xiaomei
+  personality: Enjoys working, cool designer, always positive and really supportive
+    friend
   grid: {fileID: 1054333570}
   assignedDesk: {fileID: 1706768843}
   speed: 2
@@ -4262,6 +4493,12 @@ MonoBehaviour:
   stuckMoveThreshold: 0.08
   replanCooldown: 0.8
   reservedLookaheadPoints: 5
+  useLLMBrain: 1
+  brainDecisionInterval: 20
+  brainDirectiveTtl: 30
+  logBrainDecisions: 0
+  showThoughtBubble: 1
+  thoughtBubble: {fileID: 0}
   anim: {fileID: 0}
   hatAnchor: {fileID: 590711537}
   defaultHatAnchorLocalPosition: {x: 0, y: 0.5, z: 0}
@@ -5560,9 +5797,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   actionType: 2
-  useTime: 4
+  useTime: 12
   baseScore: 5
-  capacity: 2
+  capacity: 4
   multiUserSlotRadius: 0.5
   singleUserTargetOffset: {x: 0, y: 0}
   facing: 0
@@ -6437,6 +6674,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   agentType: agent4
+  agentId: 
+  displayName: Linli
+  personality: Does't really like work, but finishing all tasks on time, manager,
+    like wearing suits, doing basketball in free time
   grid: {fileID: 1054333570}
   assignedDesk: {fileID: 2059408493}
   speed: 1.6
@@ -6459,6 +6700,12 @@ MonoBehaviour:
   stuckMoveThreshold: 0.08
   replanCooldown: 0.8
   reservedLookaheadPoints: 5
+  useLLMBrain: 1
+  brainDecisionInterval: 20
+  brainDirectiveTtl: 30
+  logBrainDecisions: 0
+  showThoughtBubble: 1
+  thoughtBubble: {fileID: 0}
   anim: {fileID: 0}
   hatAnchor: {fileID: 1819649925}
   defaultHatAnchorLocalPosition: {x: 0, y: 0.5, z: 0}
@@ -6629,6 +6876,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   agentType: 
+  agentId: 
+  displayName: DianMei
+  personality: Content operator, really talented and popular in internet, sometimes
+    can be stressed, because she is responsible, she has a younger sister, likes
+    going to KTV
   grid: {fileID: 1054333570}
   assignedDesk: {fileID: 846646336}
   speed: 2
@@ -6651,6 +6903,12 @@ MonoBehaviour:
   stuckMoveThreshold: 0.08
   replanCooldown: 0.8
   reservedLookaheadPoints: 5
+  useLLMBrain: 1
+  brainDecisionInterval: 20
+  brainDirectiveTtl: 30
+  logBrainDecisions: 1
+  showThoughtBubble: 1
+  thoughtBubble: {fileID: 0}
   anim: {fileID: 0}
   hatAnchor: {fileID: 0}
   defaultHatAnchorLocalPosition: {x: 0, y: 0.5, z: 0}
@@ -6756,3 +7014,5 @@ SceneRoots:
   - {fileID: 1227278105}
   - {fileID: 665251314}
   - {fileID: 473882586}
+  - {fileID: 336801966}
+  - {fileID: 966885347}

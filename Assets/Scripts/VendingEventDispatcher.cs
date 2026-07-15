@@ -32,6 +32,9 @@ public class VendingEventDispatcher : MonoBehaviour
 
     private static Sprite cachedWhiteSprite;
 
+    private VendingMachineAvatar machineAvatar;
+    private Sprite[] fallbackDropSprites;
+
     public IReadOnlyList<VendingEventSO> Events => events;
 
     public static VendingEventDispatcher Ensure()
@@ -199,7 +202,7 @@ public class VendingEventDispatcher : MonoBehaviour
 
         List<AIWorkerAgent> targets = ResolveTargets(evt);
 
-        SpawnDrop(evt, targets);
+        PlayMachineReaction(evt, targets);
         ApplyCosmetic(evt, targets);
 
         if (targets.Count == 0)
@@ -570,7 +573,6 @@ public class VendingEventDispatcher : MonoBehaviour
         }
 
         StartCoroutine(ConfettiRain(Mathf.Max(evt.confettiCount, 220), duration, evt.confettiSprite));
-        StartCoroutine(DiscoLights(duration));
         StartCoroutine(DiscoScreenTint(duration));
 
         float interval = 0.45f;
@@ -581,56 +583,6 @@ public class VendingEventDispatcher : MonoBehaviour
             yield return new WaitForSeconds(interval);
 
             StartCoroutine(ConfettiRain(36, 1.2f, evt.confettiSprite));
-        }
-    }
-
-    private IEnumerator DiscoLights(float duration)
-    {
-        Camera cam = Camera.main;
-        Vector3 center = cam != null ? cam.transform.position : Vector3.zero;
-        center.z = 0f;
-
-        List<GameObject> lights = new List<GameObject>();
-        for (int i = 0; i < 5; i++)
-        {
-            GameObject lightObj = new GameObject("Disco Light");
-            lightObj.transform.position = GetViewportWorldPoint(Random.Range(0.18f, 0.82f), Random.Range(0.2f, 0.8f));
-            lightObj.transform.localScale = new Vector3(Random.Range(160f, 280f), Random.Range(18f, 34f), 1f);
-
-            SpriteRenderer sr = lightObj.AddComponent<SpriteRenderer>();
-            sr.sprite = GetWhiteSprite();
-            sr.color = Color.HSVToRGB(Random.value, 0.85f, 1f);
-            sr.sortingOrder = dropSortingOrder + 120;
-            lights.Add(lightObj);
-        }
-
-        float elapsed = 0f;
-        while (elapsed < duration)
-        {
-            elapsed += Time.deltaTime;
-            for (int i = 0; i < lights.Count; i++)
-            {
-                GameObject lightObj = lights[i];
-                if (lightObj == null)
-                    continue;
-
-                lightObj.transform.Rotate(0f, 0f, (i % 2 == 0 ? 160f : -140f) * Time.deltaTime);
-                SpriteRenderer sr = lightObj.GetComponent<SpriteRenderer>();
-                if (sr != null)
-                {
-                    Color color = Color.HSVToRGB(Mathf.Repeat((elapsed * 0.45f) + i * 0.18f, 1f), 0.9f, 1f);
-                    color.a = 0.62f + Mathf.Sin(elapsed * 8f + i) * 0.22f;
-                    sr.color = color;
-                }
-            }
-
-            yield return null;
-        }
-
-        for (int i = 0; i < lights.Count; i++)
-        {
-            if (lights[i] != null)
-                Destroy(lights[i]);
         }
     }
 
@@ -897,6 +849,36 @@ public class VendingEventDispatcher : MonoBehaviour
         return null;
     }
 
+    private VendingMachineAvatar GetMachineAvatar()
+    {
+        if (machineAvatar != null)
+            return machineAvatar;
+
+        machineAvatar = FindFirstObjectByType<VendingMachineAvatar>();
+        return machineAvatar;
+    }
+
+    private void PlayMachineReaction(VendingEventSO evt, List<AIWorkerAgent> targets)
+    {
+        if (evt.cosmeticType != VendingCosmeticType.None)
+            return;
+
+        VendingMachineAvatar avatar = GetMachineAvatar();
+        if (avatar == null)
+        {
+            SpawnDrop(evt, targets);
+            return;
+        }
+
+        Sprite sprite = PickDropSprite(evt);
+        if (sprite == null)
+            sprite = PickFallbackDropSprite();
+        avatar.React(sprite, Mathf.Max(0.1f, evt.dropLifetime), Mathf.Max(0.01f, evt.dropScale));
+
+        if (targets.Count > 0 && targets[0] != null)
+            HighlightTransform(targets[0].transform, Mathf.Min(Mathf.Max(1.6f, evt.dropLifetime), 4f));
+    }
+
     private void SpawnDrop(VendingEventSO evt, List<AIWorkerAgent> targets)
     {
         Sprite sprite = PickDropSprite(evt);
@@ -1032,6 +1014,41 @@ public class VendingEventDispatcher : MonoBehaviour
 
         Sprite sprite = PickSprite(evt.dropSprites);
         return sprite != null ? sprite : evt.dropSprite;
+    }
+
+    private Sprite PickFallbackDropSprite()
+    {
+        if (fallbackDropSprites == null)
+        {
+            List<Sprite> pool = new List<Sprite>();
+            if (events != null)
+            {
+                foreach (VendingEventSO e in events)
+                {
+                    if (e == null)
+                        continue;
+
+                    if (e.dropSprites != null && e.dropSprites.Length > 0)
+                    {
+                        foreach (Sprite s in e.dropSprites)
+                        {
+                            if (s != null)
+                                pool.Add(s);
+                        }
+                        break;
+                    }
+
+                    if (e.dropSprite != null)
+                    {
+                        pool.Add(e.dropSprite);
+                        break;
+                    }
+                }
+            }
+            fallbackDropSprites = pool.ToArray();
+        }
+
+        return PickSprite(fallbackDropSprites);
     }
 
     private static Sprite PickSprite(Sprite[] sprites)
