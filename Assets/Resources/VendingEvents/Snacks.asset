@@ -13,8 +13,8 @@ MonoBehaviour:
   m_Name: Snacks
   m_EditorClassIdentifier: 
   eventId: vending_drop
-  displayName: Vending Event
-  description: Something happened in the office.
+  displayName: Vending Treat
+  description: A coffee or snack appears for a moment.
   icon: {fileID: 0}
   dropSprite: {fileID: 0}
   dropSprites:
@@ -58,8 +58,8 @@ MonoBehaviour:
   dropScale: 0.65
   scope: 0
   nearbyRadius: 2
-  energyChange: 0
-  focusChange: 0
+  energyChange: 8
+  focusChange: 4
   socialChange: 0
   productivityChange: 0
   speedMultiplier: 1
@@ -82,9 +82,9 @@ MonoBehaviour:
   confettiCount: 24
   confettiDuration: 1.2
   confettiSprite: {fileID: 0}
-  announceDuration: 1.5
+  announceDuration: 1.1
   interactionDirection: 0
-  physicalProductId: 
+  physicalProductId: vending_treat
   targetUserId: user_001
   offlineReward:
     rewardType: 0

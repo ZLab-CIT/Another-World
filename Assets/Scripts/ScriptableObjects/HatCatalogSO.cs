@@ -15,7 +15,7 @@ public class HatCatalogSO : ScriptableObject
     [System.Serializable]
     public class HatPool
     {
-        [Tooltip("Must match an AIWorkerAgent.agentType value.")]
+        [Tooltip("Must match the Agent Type in an AgentProfileSO.")]
         public string agentType = "";
         public HatEntry[] hats = new HatEntry[0];
     }

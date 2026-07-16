@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public enum VendingEventScope
 {
@@ -17,12 +18,11 @@ public enum VendingRarity
 
 public enum VendingCosmeticType
 {
-    None,
-    AgentTint,
-    FurnitureUnlock,
-    ConfettiBurst,
-    AgentHat,
-    DiscoDance
+    None = 0,
+    FurnitureUnlock = 2,
+    ConfettiBurst = 3,
+    AgentHat = 4,
+    DiscoDance = 5
 }
 
 public enum UpgradeableFurnitureKind
@@ -39,13 +39,6 @@ public enum InteractionDirection
     Bidirectional
 }
 
-public enum PhysicalEventType
-{
-    Sale,
-    Restock,
-    CouponRedeemed
-}
-
 public enum OfflineRewardType
 {
     None,
@@ -57,10 +50,8 @@ public enum OfflineRewardType
 [System.Serializable]
 public struct PhysicalInteractionEvent
 {
-    public PhysicalEventType eventType;
     public string productId;
     public string userId;
-    public string sourceId;
 }
 
 [System.Serializable]
@@ -122,8 +113,9 @@ public class VendingEventSO : ScriptableObject
     [Header("Gacha / Cosmetic")]
     public VendingRarity rarity = VendingRarity.Common;
     public VendingCosmeticType cosmeticType = VendingCosmeticType.None;
-    [Tooltip("Color applied to the agent sprite (AgentTint) or to the placeholder furniture.")]
-    public Color agentTint = Color.white;
+    [FormerlySerializedAs("agentTint")]
+    [Tooltip("Color used when FurnitureUnlock has no sprite or prefab.")]
+    public Color placeholderColor = Color.white;
     [Tooltip("Optional prefab (with an OfficeActionPoint) for FurnitureUnlock. If empty, a placeholder is spawned.")]
     public GameObject furniturePrefab;
     [Tooltip("Optional random pool for decoration/furniture sprites.")]

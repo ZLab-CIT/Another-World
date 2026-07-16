@@ -1,0 +1,18 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c54ae0910535e5543bd021d5ce8d01fb, type: 3}
+  m_Name: Coffee
+  eventId: coffee
+  displayName: Coffee Drop
+  description: Caffeine hits the office - frenzy mode!
+  energyChange: 30
+  speedMultiplier: 2
+  speedBuffDuration: 30
+  focusDecayMultiplier: 0
+  decayOverrideDuration: 30
+  announceDuration: 1.5
+  physicalProductId: coffee
+  targetUserId: user_001

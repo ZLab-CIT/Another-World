@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a1111111111111111111111111111111, type: 3}
+  m_Name: Xiaomei
+  m_EditorClassIdentifier:
+  agentId: xiaomei
+  displayName: Xiaomei
+  agentType: agent5
+  role: Designer
+  biography: Xiaomei enjoys her work and is known as a cool designer and a supportive friend.
+  traits:
+  - positive
+  - creative
+  - supportive
+  - enthusiastic
+  interests:
+  - design
+  - creative work
+  - helping friends
+  speechStyle: Upbeat, encouraging, and expressive without sounding overly formal.

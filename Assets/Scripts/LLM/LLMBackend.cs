@@ -50,10 +50,9 @@ public class OpenAICompatibleBackend : ILLMBackend
 
     public async Task<string> CompleteAsync(List<ChatMessage> messages, LLMOptions options = null)
     {
-        if (options == null)
-            options = new LLMOptions();
+        options ??= new LLMOptions();
 
-        RequestPayload payload = new RequestPayload
+        RequestPayload payload = new()
         {
             model = model,
             messages = messages,
@@ -67,7 +66,7 @@ public class OpenAICompatibleBackend : ILLMBackend
 
         string json = JsonUtility.ToJson(payload);
 
-        using (UnityWebRequest req = new UnityWebRequest(baseUrl + "/chat/completions", "POST"))
+        using (UnityWebRequest req = new(baseUrl + "/chat/completions", "POST"))
         {
             req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
             req.downloadHandler = new DownloadHandlerBuffer();
@@ -94,10 +93,20 @@ public class OpenAICompatibleBackend : ILLMBackend
 
     private static Task<UnityWebRequest.Result> WebRequestTask(UnityWebRequest req)
     {
-        var tcs = new TaskCompletionSource<UnityWebRequest.Result>();
+        return WaitForWebRequest(req);
+    }
+
+    private static async Task<UnityWebRequest.Result> WaitForWebRequest(UnityWebRequest req)
+    {
         UnityWebRequestAsyncOperation op = req.SendWebRequest();
-        op.completed += _ => tcs.SetResult(req.result);
-        return tcs.Task;
+
+        // Do not subscribe a managed delegate to AsyncOperation.completed here.
+        // Unity can keep that native operation alive across an Editor domain reload,
+        // then try to release a GC handle owned by the previous scripting domain.
+        while (!op.isDone)
+            await Task.Yield();
+
+        return req.result;
     }
 
     [Serializable]

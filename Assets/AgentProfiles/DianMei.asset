@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a1111111111111111111111111111111, type: 3}
+  m_Name: DianMei
+  m_EditorClassIdentifier:
+  agentId: dianmei
+  displayName: DianMei
+  agentType: agent3
+  role: Content operator
+  biography: DianMei is a talented and popular internet content operator. Responsibility can make her stressed, and she has a younger sister.
+  traits:
+  - talented
+  - responsible
+  - socially aware
+  - sometimes stressed
+  interests:
+  - internet culture
+  - content creation
+  - KTV
+  - family
+  speechStyle: Lively and socially perceptive, but becomes concise or worried when under pressure.

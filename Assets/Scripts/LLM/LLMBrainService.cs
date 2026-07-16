@@ -34,7 +34,7 @@ public class AgentProfile
     public string agentId;
     public string displayName;
     public string personality;
-    public readonly List<string> memory = new List<string>();
+    public readonly List<string> memory = new();
 }
 
 [Serializable]
@@ -76,7 +76,7 @@ public class LLMBrainService : MonoBehaviour
     [SerializeField] private AgentPersonalityEntry[] personalities;
 
     private ILLMBackend backend;
-    private readonly Dictionary<string, AgentProfile> profiles = new Dictionary<string, AgentProfile>();
+    private readonly Dictionary<string, AgentProfile> profiles = new();
     private int inFlight;
 
     public static LLMBrainService Ensure()
@@ -84,7 +84,7 @@ public class LLMBrainService : MonoBehaviour
         if (Instance != null)
             return Instance;
 
-        GameObject go = new GameObject(nameof(LLMBrainService));
+        GameObject go = new(nameof(LLMBrainService));
         return go.AddComponent<LLMBrainService>();
     }
 
@@ -163,7 +163,7 @@ public class LLMBrainService : MonoBehaviour
                 ? ""
                 : profile.personality + " ";
 
-            List<ChatMessage> messages = new List<ChatMessage>
+            List<ChatMessage> messages = new()
             {
                 new ChatMessage("system",
                     "You are " + (string.IsNullOrEmpty(profile.displayName) ? agentId : profile.displayName) +
@@ -173,7 +173,7 @@ public class LLMBrainService : MonoBehaviour
                 new ChatMessage("user", speakerName + " says: \"" + line + "\"")
             };
 
-            LLMOptions opts = new LLMOptions
+            LLMOptions opts = new()
             {
                 temperature = temperature,
                 maxTokens = 48,
@@ -218,7 +218,7 @@ public class LLMBrainService : MonoBehaviour
             string who = string.IsNullOrEmpty(profile.displayName) ? agentId : profile.displayName;
             string present = string.IsNullOrEmpty(participants) ? "coworkers" : participants;
 
-            List<ChatMessage> messages = new List<ChatMessage>
+            List<ChatMessage> messages = new()
             {
                 new ChatMessage("system",
                     "You are " + who + " in a 2D office. " + persona +
@@ -229,7 +229,7 @@ public class LLMBrainService : MonoBehaviour
                 new ChatMessage("user", lastSpeaker + " said: \"" + lastLine + "\"")
             };
 
-            LLMOptions opts = new LLMOptions
+            LLMOptions opts = new()
             {
                 temperature = temperature,
                 maxTokens = 48,
@@ -278,7 +278,7 @@ public class LLMBrainService : MonoBehaviour
             string who = string.IsNullOrEmpty(profile.displayName) ? agentId : profile.displayName;
             string with = string.IsNullOrEmpty(present) ? "some coworkers" : present;
 
-            List<ChatMessage> messages = new List<ChatMessage>
+            List<ChatMessage> messages = new()
             {
                 new ChatMessage("system",
                     "You are " + who + " in a 2D office. " + persona +
@@ -287,7 +287,7 @@ public class LLMBrainService : MonoBehaviour
                 new ChatMessage("user", "Start the conversation.")
             };
 
-            LLMOptions opts = new LLMOptions
+            LLMOptions opts = new()
             {
                 temperature = temperature,
                 maxTokens = 48,
@@ -344,7 +344,7 @@ public class LLMBrainService : MonoBehaviour
         try
         {
             List<ChatMessage> messages = BuildDecisionMessages(profile, state, options);
-            LLMOptions opts = new LLMOptions
+            LLMOptions opts = new()
             {
                 temperature = temperature,
                 maxTokens = maxTokens,
@@ -383,7 +383,7 @@ public class LLMBrainService : MonoBehaviour
     private List<ChatMessage> BuildDecisionMessages(
         AgentProfile profile, AgentStateSnapshot state, List<ActionOption> options)
     {
-        List<ChatMessage> messages = new List<ChatMessage>();
+        List<ChatMessage> messages = new();
 
         messages.Add(new ChatMessage("system",
             "You roleplay a worker in a 2D office simulation. Stay in character and pick ONE action to do next. " +
@@ -393,7 +393,7 @@ public class LLMBrainService : MonoBehaviour
             "Vary your tone: gripe, joke, observe, daydream, or react. Do NOT just justify the action (e.g. \"need coffee\"). Avoid repeating the same opening.\n\n" +
             "Your profile: " + profile.personality));
 
-        StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new();
         sb.Append("Status - energy: ").Append(Mathf.RoundToInt(state.energy));
         sb.Append(", focus: ").Append(Mathf.RoundToInt(state.focus));
         sb.Append(", social: ").Append(Mathf.RoundToInt(state.social));
@@ -501,16 +501,15 @@ public class LLMBrainService : MonoBehaviour
     [ContextMenu("Test Connection")]
     private async void TestConnection()
     {
-        if (backend == null)
-            backend = new OpenAICompatibleBackend(baseUrl, apiKey, model);
+        backend ??= new OpenAICompatibleBackend(baseUrl, apiKey, model);
 
-        List<ChatMessage> messages = new List<ChatMessage>
+        List<ChatMessage> messages = new()
         {
             new ChatMessage("system", "Respond ONLY with JSON: {\"ok\": true, \"msg\": string}."),
             new ChatMessage("user", "Say hello in one short sentence.")
         };
 
-        LLMOptions opts = new LLMOptions { temperature = 0.5f, maxTokens = 64, jsonMode = true };
+        LLMOptions opts = new() { temperature = 0.5f, maxTokens = 64, jsonMode = true };
         string result = await backend.CompleteAsync(messages, opts);
 
         Debug.Log(nameof(LLMBrainService) + " test response: " + (result ?? "(null/failed - is Ollama running?)"));

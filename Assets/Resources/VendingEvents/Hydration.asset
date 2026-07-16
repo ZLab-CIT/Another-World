@@ -1,0 +1,17 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c54ae0910535e5543bd021d5ce8d01fb, type: 3}
+  m_Name: Hydration
+  eventId: hydration
+  displayName: Hydration
+  description: Sustained calm focus for everyone.
+  scope: 2
+  focusChange: 15
+  energyDecayMultiplier: 0.5
+  decayOverrideDuration: 60
+  announceDuration: 1.4
+  physicalProductId: water
+  targetUserId: user_001

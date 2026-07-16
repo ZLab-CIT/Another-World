@@ -13,8 +13,8 @@ MonoBehaviour:
   m_Name: Plant
   m_EditorClassIdentifier: 
   eventId: plant
-  displayName: Vending Event
-  description: Something happened in the office.
+  displayName: Office Plant
+  description: A plant grows in the office upgrade corner.
   icon: {fileID: 0}
   dropSprite: {fileID: 0}
   dropSprites: []
@@ -36,7 +36,7 @@ MonoBehaviour:
   postFocusChange: 0
   postSocialChange: 0
   postProductivityChange: 0
-  rarity: 0
+  rarity: 2
   cosmeticType: 2
   agentTint: {r: 1, g: 1, b: 1, a: 1}
   furniturePrefab: {fileID: 0}
@@ -57,7 +57,7 @@ MonoBehaviour:
   confettiCount: 24
   confettiDuration: 1.2
   confettiSprite: {fileID: 0}
-  announceDuration: 1.5
+  announceDuration: 1.6
   interactionDirection: 0
   physicalProductId: office_plant
   targetUserId: user_001

@@ -56,5 +56,5 @@
         "temp/": true,
         "Temp/": true
     },
-    "dotnet.defaultSolution": "ZhipuOffice.sln"
+    "dotnet.defaultSolution": "Another-World.sln"
 }
