@@ -14,78 +14,46 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   pools:
   - agentType: agent1
+    standingOffset: {x: 0, y: 0.5, z: 0}
+    sittingOffset: {x: 0.05, y: 0.8, z: 0}
     hats:
     - sprite: {fileID: 1710590514, guid: d0b9bebfe360f9e4bb69d70d9d599843, type: 3}
-      localOffset: {x: 0, y: 0, z: 0}
-      sittingLocalOffset: {x: 0.1, y: 0.5, z: 0}
-      localScale: {x: 0.5, y: 0.5, z: 1}
+      localScale: {x: 0.55, y: 0.55, z: 1}
     - sprite: {fileID: -600064860, guid: d0b9bebfe360f9e4bb69d70d9d599843, type: 3}
-      localOffset: {x: 0, y: 0, z: 0}
-      sittingLocalOffset: {x: 0.1, y: 0.5, z: 0}
       localScale: {x: 0.5, y: 0.5, z: 1}
     - sprite: {fileID: -1484217903, guid: d0b9bebfe360f9e4bb69d70d9d599843, type: 3}
-      localOffset: {x: 0, y: 0, z: 0}
-      sittingLocalOffset: {x: 0.1, y: 0.5, z: 0}
       localScale: {x: 0.5, y: 0.5, z: 1}
     - sprite: {fileID: 1199812176, guid: d0b9bebfe360f9e4bb69d70d9d599843, type: 3}
-      localOffset: {x: 0, y: 0, z: 0}
-      sittingLocalOffset: {x: 0.1, y: 0.5, z: 0}
       localScale: {x: 0.5, y: 0.5, z: 1}
     - sprite: {fileID: -1213976580, guid: d0b9bebfe360f9e4bb69d70d9d599843, type: 3}
-      localOffset: {x: 0, y: 0.3, z: 0}
-      sittingLocalOffset: {x: 0.1, y: 0.7, z: 0}
       localScale: {x: 0.6, y: 0.6, z: 1}
     - sprite: {fileID: -1831625187, guid: d0b9bebfe360f9e4bb69d70d9d599843, type: 3}
-      localOffset: {x: 0, y: 0, z: 0}
-      sittingLocalOffset: {x: 0.1, y: 0.5, z: 0}
       localScale: {x: 0.55, y: 0.55, z: 1}
     - sprite: {fileID: -2136773240, guid: d0b9bebfe360f9e4bb69d70d9d599843, type: 3}
-      localOffset: {x: 0, y: 0.2, z: 0}
-      sittingLocalOffset: {x: 0.1, y: 0.6, z: 0}
       localScale: {x: 0.55, y: 0.55, z: 1}
     - sprite: {fileID: 1582492395, guid: d0b9bebfe360f9e4bb69d70d9d599843, type: 3}
-      localOffset: {x: 0, y: 0.3, z: 0}
-      sittingLocalOffset: {x: 0.1, y: 0.7, z: 0}
       localScale: {x: 0.55, y: 0.55, z: 1}
   - agentType: agent4
+    standingOffset: {x: 0, y: 0.7, z: 0}
+    sittingOffset: {x: 0.2, y: 1.1, z: 0}
     hats:
     - sprite: {fileID: -1054089511, guid: 8709fb14b883be844b2771a5a312dbcf, type: 3}
-      localOffset: {x: 0, y: 0.1, z: 0}
-      sittingLocalOffset: {x: 0.1, y: 0.5, z: 0}
-      localScale: {x: 0.6, y: 0.6, z: 1}
+      localScale: {x: 0.8, y: 0.8, z: 1}
     - sprite: {fileID: -1641713844, guid: 8709fb14b883be844b2771a5a312dbcf, type: 3}
-      localOffset: {x: 0, y: 0, z: 0}
-      sittingLocalOffset: {x: 0.1, y: 0.5, z: 0}
       localScale: {x: 0.5, y: 0.5, z: 1}
     - sprite: {fileID: -1217074570, guid: 8709fb14b883be844b2771a5a312dbcf, type: 3}
-      localOffset: {x: 0, y: 0, z: 0}
-      sittingLocalOffset: {x: 0.2, y: 0.6, z: 0}
       localScale: {x: 0.5, y: 0.5, z: 1}
     - sprite: {fileID: 395900609, guid: 8709fb14b883be844b2771a5a312dbcf, type: 3}
-      localOffset: {x: 0, y: 0.3, z: 0}
-      sittingLocalOffset: {x: 0.1, y: 0.5, z: 0}
       localScale: {x: 0.5, y: 0.5, z: 1}
     - sprite: {fileID: 1151623303, guid: 8709fb14b883be844b2771a5a312dbcf, type: 3}
-      localOffset: {x: 0, y: 0.3, z: 0}
-      sittingLocalOffset: {x: 0.1, y: 0.7, z: 0}
       localScale: {x: 0.6, y: 0.6, z: 1}
     - sprite: {fileID: 1871639140, guid: 8709fb14b883be844b2771a5a312dbcf, type: 3}
-      localOffset: {x: 0, y: 0.3, z: 0}
-      sittingLocalOffset: {x: 0.2, y: 0.6, z: 0}
       localScale: {x: 0.55, y: 0.55, z: 1}
     - sprite: {fileID: -647670190, guid: 8709fb14b883be844b2771a5a312dbcf, type: 3}
-      localOffset: {x: 0, y: 0.2, z: 0}
-      sittingLocalOffset: {x: 0.2, y: 0.6, z: 0}
       localScale: {x: 0.55, y: 0.55, z: 1}
     - sprite: {fileID: -1404955205, guid: 8709fb14b883be844b2771a5a312dbcf, type: 3}
-      localOffset: {x: 0, y: 0.3, z: 0}
-      sittingLocalOffset: {x: 0.1, y: 0.7, z: 0}
       localScale: {x: 0.55, y: 0.55, z: 1}
     - sprite: {fileID: -717443371, guid: 8709fb14b883be844b2771a5a312dbcf, type: 3}
-      localOffset: {x: 0, y: 0.3, z: 0}
-      sittingLocalOffset: {x: 0.2, y: 0.5, z: 0}
       localScale: {x: 0.55, y: 0.55, z: 1}
     - sprite: {fileID: -226489508, guid: 8709fb14b883be844b2771a5a312dbcf, type: 3}
-      localOffset: {x: 0, y: 0.3, z: 0}
-      sittingLocalOffset: {x: 0.1, y: 0.7, z: 0}
-      localScale: {x: 0.55, y: 0.55, z: 1}
+      localScale: {x: 0.6, y: 0.6, z: 1}

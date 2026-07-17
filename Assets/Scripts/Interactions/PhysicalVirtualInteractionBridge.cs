@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+[RequireComponent(typeof(VendingEventDispatcher))]
 public class PhysicalVirtualInteractionBridge : MonoBehaviour
 {
     public static PhysicalVirtualInteractionBridge Instance { get; private set; }
@@ -16,6 +17,7 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
     [SerializeField] private bool issueMilestoneCouponOnlyOnce = true;
 
     private readonly HashSet<string> issuedMilestones = new();
+    private VendingEventDispatcher dispatcher;
     public static PhysicalVirtualInteractionBridge Ensure()
     {
         if (Instance != null)
@@ -34,8 +36,7 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
         }
 
         Instance = this;
-
-        VendingEventDispatcher.Ensure();
+        dispatcher = GetComponent<VendingEventDispatcher>();
     }
 
     public void TriggerMockPhysicalSale(string productId)
@@ -83,11 +84,7 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
             return;
         }
 
-        VendingEventDispatcher dispatcher = VendingEventDispatcher.Instance;
-        if (dispatcher == null)
-            dispatcher = VendingEventDispatcher.Ensure();
-
-        VendingEventSO evt = FindEventForProduct(dispatcher, physicalEvent.productId);
+        VendingEventSO evt = dispatcher.FindEventByProductId(physicalEvent.productId);
         if (evt == null)
         {
             LogHistory("physical_sale rejected: no virtual event for product '" + physicalEvent.productId + "'");
@@ -129,10 +126,6 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
 
         LogHistory("coupon_issued: " + reward.couponId + " -> user: " + resolvedUserId);
 
-        VendingEventDispatcher dispatcher = VendingEventDispatcher.Instance;
-        if (dispatcher == null)
-            dispatcher = VendingEventDispatcher.Ensure();
-
         dispatcher.ShowOfflineCoupon(resolvedUserId, reward);
     }
 
@@ -169,23 +162,6 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
         IssueCoupon(defaultUserId, defaultCouponId);
     }
 
-    private VendingEventSO FindEventForProduct(VendingEventDispatcher dispatcher, string productId)
-    {
-        if (dispatcher == null)
-            return null;
-
-        foreach (VendingEventSO evt in dispatcher.Events)
-        {
-            if (evt == null)
-                continue;
-
-            if (!string.IsNullOrEmpty(evt.physicalProductId) && evt.physicalProductId == productId)
-                return evt;
-        }
-
-        return null;
-    }
-
     private void IssueCouponFromEvent(string userId, VendingEventSO evt)
     {
         OfflineCouponReward reward = evt.offlineReward;
@@ -201,23 +177,10 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
         IssueCoupon(string.IsNullOrEmpty(userId) ? evt.targetUserId : userId, reward);
     }
 
-    private static string PickProduct(bool cosmetic)
+    private string PickProduct(bool cosmetic)
     {
-        VendingEventDispatcher dispatcher = VendingEventDispatcher.Instance ?? VendingEventDispatcher.Ensure();
-        List<string> products = new();
-        foreach (VendingEventSO evt in dispatcher.Events)
-        {
-            if (evt == null || string.IsNullOrWhiteSpace(evt.physicalProductId))
-                continue;
-
-            if ((evt.cosmeticType != VendingCosmeticType.None) == cosmetic)
-                products.Add(evt.physicalProductId);
-        }
-
-        if (products.Count == 0)
-            return "";
-
-        return products[Random.Range(0, products.Count)];
+        VendingEventSO evt = dispatcher.PickEvent(cosmetic);
+        return evt != null ? evt.physicalProductId : "";
     }
 
     private void LogHistory(string line)

@@ -9,79 +9,15 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c54ae0910535e5543bd021d5ce8d01fb, type: 3}
+  m_Script: {fileID: 11500000, guid: a387cabed70a4fa2ac6074eb778901a6, type: 3}
   m_Name: Furniture
   m_EditorClassIdentifier: 
   eventId: lounge
   displayName: Lounge Upgrade
   description: The break area gets a more comfortable upgrade.
   icon: {fileID: 0}
-  dropSprite: {fileID: 0}
-  dropSprites:
-  - {fileID: 1706385710, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -1006238096, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -1845176046, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 1572808189, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 961599217, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 1544617142, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -539460439, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 1746171607, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -2109591971, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -1390792929, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 467792285, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 185965948, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 263966502, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -233093073, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -2891020, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -71470302, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 1613289031, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -1933005409, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -174437102, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 228333390, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -1685258806, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -1253049071, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 1563407412, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -568314445, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 363981359, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -1422653975, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -1638014737, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -1301574671, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 568117079, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 381688971, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 1755262330, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 712694120, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 1302494026, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 1557831421, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: 1496155705, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  - {fileID: -1091413541, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
-  dropLifetime: 3
-  dropScale: 1
   scope: 0
   nearbyRadius: 2
-  energyChange: 0
-  focusChange: 0
-  socialChange: 0
-  productivityChange: 0
-  speedMultiplier: 1
-  speedBuffDuration: 0
-  energyDecayMultiplier: 1
-  focusDecayMultiplier: 1
-  socialDecayMultiplier: 1
-  decayOverrideDuration: 0
-  postEnergyChange: 0
-  postFocusChange: 0
-  postSocialChange: 0
-  postProductivityChange: 0
-  rarity: 2
-  cosmeticType: 2
-  agentTint: {r: 1, g: 1, b: 1, a: 1}
-  furniturePrefab: {fileID: 0}
-  furnitureSprites: []
-  furnitureKind: 2
-  furnitureSocketId: Lounge
-  confettiCount: 24
-  confettiDuration: 1.2
-  confettiSprite: {fileID: 0}
   announceDuration: 1.6
   interactionDirection: 0
   physicalProductId: lounge_upgrade
@@ -91,3 +27,15 @@ MonoBehaviour:
     couponId: 
     displayName: 
     description: 
+  rarity: 2
+  placeholderColor: {r: 1, g: 1, b: 1, a: 1}
+  furniturePrefab: {fileID: 0}
+  furnitureSprites:
+  - {fileID: 1732811989, guid: 65bf506cdfd8e0c4fa2f4f5e7a6ae972, type: 3}
+  - {fileID: 1782561415, guid: 65bf506cdfd8e0c4fa2f4f5e7a6ae972, type: 3}
+  - {fileID: 1659510581, guid: 65bf506cdfd8e0c4fa2f4f5e7a6ae972, type: 3}
+  - {fileID: 596942292, guid: 65bf506cdfd8e0c4fa2f4f5e7a6ae972, type: 3}
+  - {fileID: -1766230953, guid: 65bf506cdfd8e0c4fa2f4f5e7a6ae972, type: 3}
+  furnitureScale: 0.45
+  furnitureKind: 2
+  furnitureSocketId: Lounge

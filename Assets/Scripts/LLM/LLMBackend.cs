@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -23,7 +24,16 @@ public class LLMOptions
     public float temperature = 0.8f;
     public int maxTokens = 256;
     public bool jsonMode = false;
+    public LLMJsonSchema structuredSchema = LLMJsonSchema.None;
     public int timeoutSeconds = 30;
+    public CancellationToken cancellationToken = CancellationToken.None;
+}
+
+public enum LLMJsonSchema
+{
+    None,
+    ConversationPlan,
+    ConversationScript
 }
 
 public interface ILLMBackend
@@ -51,6 +61,8 @@ public class OpenAICompatibleBackend : ILLMBackend
     public async Task<string> CompleteAsync(List<ChatMessage> messages, LLMOptions options = null)
     {
         options ??= new LLMOptions();
+        if (options.cancellationToken.IsCancellationRequested)
+            return null;
 
         RequestPayload payload = new()
         {
@@ -61,10 +73,13 @@ public class OpenAICompatibleBackend : ILLMBackend
             stream = false
         };
 
-        if (options.jsonMode)
-            payload.response_format = new ResponseFormat { type = "json_object" };
-
         string json = JsonUtility.ToJson(payload);
+        if (options.jsonMode)
+        {
+            string responseFormat = BuildResponseFormat(options.structuredSchema);
+            json = json.Substring(0, json.Length - 1) +
+                ",\"response_format\":" + responseFormat + "}";
+        }
 
         using (UnityWebRequest req = new(baseUrl + "/chat/completions", "POST"))
         {
@@ -75,10 +90,12 @@ public class OpenAICompatibleBackend : ILLMBackend
                 req.SetRequestHeader("Authorization", "Bearer " + apiKey);
             req.timeout = (options != null && options.timeoutSeconds > 0) ? options.timeoutSeconds : 30;
 
-            UnityWebRequest.Result result = await WebRequestTask(req);
+            UnityWebRequest.Result result = await WebRequestTask(req, options.cancellationToken);
 
             if (result != UnityWebRequest.Result.Success)
             {
+                if (options.cancellationToken.IsCancellationRequested)
+                    return null;
                 Debug.LogWarning(nameof(OpenAICompatibleBackend) + " request failed: " + req.error);
                 return null;
             }
@@ -91,12 +108,40 @@ public class OpenAICompatibleBackend : ILLMBackend
         }
     }
 
-    private static Task<UnityWebRequest.Result> WebRequestTask(UnityWebRequest req)
+    private static Task<UnityWebRequest.Result> WebRequestTask(UnityWebRequest req, CancellationToken cancellationToken)
     {
-        return WaitForWebRequest(req);
+        return WaitForWebRequest(req, cancellationToken);
     }
 
-    private static async Task<UnityWebRequest.Result> WaitForWebRequest(UnityWebRequest req)
+    private static string BuildResponseFormat(LLMJsonSchema schema)
+    {
+        switch (schema)
+        {
+            case LLMJsonSchema.ConversationPlan:
+                return "{\"type\":\"json_schema\",\"json_schema\":{" +
+                    "\"name\":\"conversation_plan\",\"strict\":true,\"schema\":{" +
+                    "\"type\":\"object\",\"properties\":{" +
+                    "\"targetAgent\":{\"type\":\"string\"}," +
+                    "\"topic\":{\"type\":\"string\"}," +
+                    "\"openingLine\":{\"type\":\"string\"}}," +
+                    "\"required\":[\"targetAgent\",\"topic\",\"openingLine\"]," +
+                    "\"additionalProperties\":false}}}";
+            case LLMJsonSchema.ConversationScript:
+                return "{\"type\":\"json_schema\",\"json_schema\":{" +
+                    "\"name\":\"conversation_script\",\"strict\":true,\"schema\":{" +
+                    "\"type\":\"object\",\"properties\":{" +
+                    "\"reply1\":{\"type\":\"string\"}," +
+                    "\"reply2\":{\"type\":\"string\"}," +
+                    "\"reply3\":{\"type\":\"string\"}}," +
+                    "\"required\":[\"reply1\",\"reply2\",\"reply3\"]," +
+                    "\"additionalProperties\":false}}}";
+            default:
+                return "{\"type\":\"json_object\"}";
+        }
+    }
+
+    private static async Task<UnityWebRequest.Result> WaitForWebRequest(
+        UnityWebRequest req, CancellationToken cancellationToken)
     {
         UnityWebRequestAsyncOperation op = req.SendWebRequest();
 
@@ -104,7 +149,14 @@ public class OpenAICompatibleBackend : ILLMBackend
         // Unity can keep that native operation alive across an Editor domain reload,
         // then try to release a GC handle owned by the previous scripting domain.
         while (!op.isDone)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                req.Abort();
+                break;
+            }
             await Task.Yield();
+        }
 
         return req.result;
     }
@@ -117,13 +169,6 @@ public class OpenAICompatibleBackend : ILLMBackend
         public float temperature;
         public int max_tokens;
         public bool stream;
-        public ResponseFormat response_format;
-    }
-
-    [Serializable]
-    private class ResponseFormat
-    {
-        public string type;
     }
 
     [Serializable]

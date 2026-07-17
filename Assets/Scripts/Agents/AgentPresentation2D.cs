@@ -1,13 +1,12 @@
-using System.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
 
+[RequireComponent(typeof(SortingGroup))]
+[ExecuteAlways]
 public class AgentPresentation2D : MonoBehaviour
 {
     [Header("Character Visuals")]
     [SerializeField] private Animator animator;
-    [SerializeField] private Transform hatAnchor;
-    [SerializeField] private Vector3 fallbackHatAnchorPosition = new(0f, 0.5f, 0f);
     [Tooltip("Base of the character group order. Child SpriteRenderer order changes made by animations are preserved inside the group.")]
     [SerializeField] private int characterGroupBaseOrder = 10000;
     [SerializeField, Min(1f)] private float sortingUnitsPerWorldUnit = 100f;
@@ -22,8 +21,6 @@ public class AgentPresentation2D : MonoBehaviour
     private Vector3 currentHatStandingOffset;
     private Vector3 currentHatSittingOffset;
     private bool lastHatSittingState;
-    private Coroutine danceRoutine;
-    private Transform runtimeHatAnchor;
     private SortingGroup sortingGroup;
 
     public bool ThoughtBubblesEnabled => thoughtBubblesEnabled;
@@ -40,6 +37,23 @@ public class AgentPresentation2D : MonoBehaviour
 
     private void Awake()
     {
+        InitializeVisuals();
+    }
+
+    private void OnEnable()
+    {
+        InitializeVisuals();
+        UpdateSortingOrder();
+    }
+
+    private void OnValidate()
+    {
+        InitializeVisuals();
+        UpdateSortingOrder();
+    }
+
+    private void InitializeVisuals()
+    {
         if (animator == null)
             animator = GetComponentInChildren<Animator>();
 
@@ -47,8 +61,6 @@ public class AgentPresentation2D : MonoBehaviour
         if (sortingGroup == null)
             sortingGroup = gameObject.AddComponent<SortingGroup>();
 
-        // Set the group layer once. Animations may still change sorting settings on
-        // child SpriteRenderers; SortingGroup keeps those relative changes intact.
         sortingGroup.sortingLayerName = "Default";
     }
 
@@ -83,10 +95,7 @@ public class AgentPresentation2D : MonoBehaviour
         if (isSitting)
             return;
 
-        int groupOrder = characterGroupBaseOrder
-            - Mathf.RoundToInt(transform.position.y * sortingUnitsPerWorldUnit);
-        if (sortingGroup.sortingOrder != groupOrder)
-            sortingGroup.sortingOrder = groupOrder;
+        UpdateSortingOrder();
     }
 
     public void ShowThought(string content)
@@ -108,28 +117,26 @@ public class AgentPresentation2D : MonoBehaviour
         thoughtBubble.Show(content);
     }
 
-    public void StartDance(float duration)
+    public void HideThought()
     {
-        if (duration <= 0f)
-            return;
+        if (thoughtBubble != null)
+            thoughtBubble.Hide();
+    }
 
-        if (danceRoutine != null)
-            StopCoroutine(danceRoutine);
+    public AgentThoughtBubble CreateSharedDialogueBubble(Transform anchor)
+    {
+        if (!thoughtBubblesEnabled || thoughtBubblePrefab == null || anchor == null)
+            return null;
 
-        danceRoutine = StartCoroutine(DanceRoutine(duration));
+        AgentThoughtBubble dialogueBubble = Instantiate(thoughtBubblePrefab, anchor);
+        dialogueBubble.name = anchor.name + " Dialogue";
+        return dialogueBubble;
     }
 
     public void ApplyHat(Sprite hatSprite, Vector3 standingOffset, Vector3 sittingOffset, Vector3 localScale)
     {
         if (hatSprite == null)
             return;
-
-        Transform resolvedHatAnchor = ResolveHatAnchor();
-        if (resolvedHatAnchor == null)
-        {
-            Debug.LogWarning($"{name}: no hat anchor could be resolved.", this);
-            return;
-        }
 
         if (currentHat != null)
             Destroy(currentHat);
@@ -138,11 +145,15 @@ public class AgentPresentation2D : MonoBehaviour
         currentHatSittingOffset = sittingOffset;
 
         currentHat = new GameObject("Hat");
-        currentHat.transform.SetParent(resolvedHatAnchor, false);
+        currentHat.transform.SetParent(VisualRoot, false);
         currentHat.transform.localPosition = lastHatSittingState ? sittingOffset : standingOffset;
         currentHat.transform.localScale = localScale;
 
-        SpriteRenderer hatRenderer = currentHat.AddComponent<SpriteRenderer>();
+        GameObject visual = new("Visual");
+        visual.transform.SetParent(currentHat.transform, false);
+        visual.transform.localPosition = new Vector3(0f, -hatSprite.bounds.min.y, 0f);
+
+        SpriteRenderer hatRenderer = visual.AddComponent<SpriteRenderer>();
         hatRenderer.sprite = hatSprite;
 
         SpriteRenderer bodyRenderer = VisualRoot.GetComponentInChildren<SpriteRenderer>();
@@ -165,45 +176,19 @@ public class AgentPresentation2D : MonoBehaviour
 
         string spriteName = renderer.sprite.name;
         int separator = spriteName.IndexOf('_');
-        return separator > 0 ? spriteName.Substring(0, separator) : spriteName;
+        return separator > 0 ? spriteName[..separator] : spriteName;
     }
 
     private Transform VisualRoot => animator != null ? animator.transform : transform;
 
-    private Transform ResolveHatAnchor()
+    private void UpdateSortingOrder()
     {
-        if (hatAnchor != null)
-            return hatAnchor;
+        if (sortingGroup == null)
+            return;
 
-        Transform found = FindChildRecursive(VisualRoot, "HatAnchor");
-        if (found != null)
-            return found;
-
-        if (runtimeHatAnchor == null)
-        {
-            GameObject anchorObject = new("HatAnchor");
-            runtimeHatAnchor = anchorObject.transform;
-            runtimeHatAnchor.SetParent(VisualRoot, false);
-            runtimeHatAnchor.localPosition = fallbackHatAnchorPosition;
-        }
-
-        return runtimeHatAnchor;
-    }
-
-    private static Transform FindChildRecursive(Transform root, string childName)
-    {
-        for (int i = 0; i < root.childCount; i++)
-        {
-            Transform child = root.GetChild(i);
-            if (child.name == childName)
-                return child;
-
-            Transform nested = FindChildRecursive(child, childName);
-            if (nested != null)
-                return nested;
-        }
-
-        return null;
+        int order = characterGroupBaseOrder
+            - Mathf.RoundToInt(transform.position.y * sortingUnitsPerWorldUnit);
+        sortingGroup.sortingOrder = order;
     }
 
     private void UpdateHatPlacement(bool isSitting)
@@ -216,26 +201,4 @@ public class AgentPresentation2D : MonoBehaviour
             currentHat.transform.localPosition = isSitting ? currentHatSittingOffset : currentHatStandingOffset;
     }
 
-    private IEnumerator DanceRoutine(float duration)
-    {
-        Transform visualRoot = VisualRoot;
-        Vector3 baseLocalPosition = visualRoot.localPosition;
-        Vector3 baseLocalScale = visualRoot.localScale;
-
-        float elapsed = 0f;
-        float phase = Random.Range(0f, Mathf.PI * 2f);
-        while (elapsed < duration)
-        {
-            elapsed += Time.deltaTime;
-            float beat = Mathf.Sin((elapsed * 9f) + phase);
-            float side = Mathf.Sin((elapsed * 5.5f) + phase);
-            visualRoot.localPosition = baseLocalPosition + new Vector3(side * 0.045f, Mathf.Abs(beat) * 0.09f, 0f);
-            visualRoot.localScale = baseLocalScale * (1f + Mathf.Abs(beat) * 0.08f);
-            yield return null;
-        }
-
-        visualRoot.localPosition = baseLocalPosition;
-        visualRoot.localScale = baseLocalScale;
-        danceRoutine = null;
-    }
 }

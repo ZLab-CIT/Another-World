@@ -3,7 +3,7 @@
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c54ae0910535e5543bd021d5ce8d01fb, type: 3}
+  m_Script: {fileID: 11500000, guid: 1b62c88e4ac44271bd0d2b06f6feb021, type: 3}
   m_Name: HealthyLunch
   eventId: healthy_lunch
   displayName: Healthy Lunch

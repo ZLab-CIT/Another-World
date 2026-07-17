@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-// Keeps track of workers for social and event systems. Workers do not block one another.
+// Keeps track of workers for social and event systems
 public class OfficeCrowdCoordinator2D : MonoBehaviour
 {
     public static OfficeCrowdCoordinator2D Instance { get; private set; }
@@ -48,7 +48,7 @@ public class OfficeCrowdCoordinator2D : MonoBehaviour
             if (worker == null || worker == requester)
                 continue;
 
-            if (((Vector2)worker.GetPosition() - position).sqrMagnitude <= rangeSquared)
+            if ((worker.GetPosition() - position).sqrMagnitude <= rangeSquared)
                 result.Add(worker);
         }
     }

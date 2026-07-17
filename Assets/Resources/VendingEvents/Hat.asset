@@ -3,13 +3,12 @@
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c54ae0910535e5543bd021d5ce8d01fb, type: 3}
+  m_Script: {fileID: 11500000, guid: a644890a7ee541e5910a24f93686ce18, type: 3}
   m_Name: Hat
   eventId: hat
   displayName: Random Hat
   description: One agent gets a stylish new hat!
   rarity: 1
-  cosmeticType: 4
   announceDuration: 1.4
   interactionDirection: 2
   physicalProductId: surprise_box

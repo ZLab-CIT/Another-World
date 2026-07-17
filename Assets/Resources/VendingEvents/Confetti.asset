@@ -3,14 +3,13 @@
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c54ae0910535e5543bd021d5ce8d01fb, type: 3}
+  m_Script: {fileID: 11500000, guid: 27b2bba9e34d4631b1e7e05a24665e17, type: 3}
   m_Name: Confetti
   eventId: confetti
   displayName: Confetti Burst
   description: A visible celebration erupts across the office!
-  cosmeticType: 3
-  confettiCount: 140
-  confettiDuration: 2.4
+  count: 140
+  duration: 2.4
   announceDuration: 1.2
   physicalProductId: confetti_pack
   targetUserId: user_001

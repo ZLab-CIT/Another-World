@@ -9,36 +9,26 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c54ae0910535e5543bd021d5ce8d01fb, type: 3}
+  m_Script: {fileID: 11500000, guid: a387cabed70a4fa2ac6074eb778901a6, type: 3}
   m_Name: Plant
   m_EditorClassIdentifier: 
   eventId: plant
   displayName: Office Plant
   description: A plant grows in the office upgrade corner.
   icon: {fileID: 0}
-  dropSprite: {fileID: 0}
-  dropSprites: []
-  dropLifetime: 3
-  dropScale: 1
   scope: 0
   nearbyRadius: 2
-  energyChange: 0
-  focusChange: 0
-  socialChange: 0
-  productivityChange: 0
-  speedMultiplier: 1
-  speedBuffDuration: 0
-  energyDecayMultiplier: 1
-  focusDecayMultiplier: 1
-  socialDecayMultiplier: 1
-  decayOverrideDuration: 0
-  postEnergyChange: 0
-  postFocusChange: 0
-  postSocialChange: 0
-  postProductivityChange: 0
+  announceDuration: 1.6
+  interactionDirection: 0
+  physicalProductId: office_plant
+  targetUserId: user_001
+  offlineReward:
+    rewardType: 0
+    couponId:
+    displayName:
+    description:
   rarity: 2
-  cosmeticType: 2
-  agentTint: {r: 1, g: 1, b: 1, a: 1}
+  placeholderColor: {r: 1, g: 1, b: 1, a: 1}
   furniturePrefab: {fileID: 0}
   furnitureSprites:
   - {fileID: 1275852170, guid: 70de415ca7c15e9479d8687d514145b8, type: 3}
@@ -52,17 +42,6 @@ MonoBehaviour:
   - {fileID: -103217976, guid: 70de415ca7c15e9479d8687d514145b8, type: 3}
   - {fileID: -615299622, guid: 70de415ca7c15e9479d8687d514145b8, type: 3}
   - {fileID: -1145134147, guid: 70de415ca7c15e9479d8687d514145b8, type: 3}
+  furnitureScale: 0.8
   furnitureKind: 0
   furnitureSocketId: Plant
-  confettiCount: 24
-  confettiDuration: 1.2
-  confettiSprite: {fileID: 0}
-  announceDuration: 1.6
-  interactionDirection: 0
-  physicalProductId: office_plant
-  targetUserId: user_001
-  offlineReward:
-    rewardType: 0
-    couponId: 
-    displayName: 
-    description: 

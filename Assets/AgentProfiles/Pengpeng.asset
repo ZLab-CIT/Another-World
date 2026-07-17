@@ -17,6 +17,7 @@ MonoBehaviour:
   agentType: agent6
   role: Office assistant and talented home cook
   biography: Pengpeng works hard, enjoys helping coworkers, and likes watching videos after work.
+  birthday:
   traits:
   - warm
   - romantic
@@ -26,3 +27,20 @@ MonoBehaviour:
   - cooking
   - watching videos
   speechStyle: Gentle, playful, and supportive. Often offers practical help.
+  relationshipNotes:
+  - Pengpeng enjoys feeding Xiaomei and trusts her honest reactions to new recipes.
+  - Mingyun is a comfortable companion for quiet breaks and silly videos.
+  - Linli rarely asks for help, so Pengpeng pays attention and offers before being asked.
+  memorySeeds:
+  - A rushed soup once became far too spicy, but everyone ate it anyway.
+  - Pengpeng saves short funny videos to show coworkers during breaks.
+  - He learned one favorite family recipe by watching rather than reading instructions.
+  conversationStarters:
+  - "{name}, I am planning what to cook tonight. Any requests?"
+  - "{name}, I found a video so ridiculous that it improved my whole evening."
+  - "{name}, you look busy. Can I make anything easier?"
+  - "{name}, I need a verdict: noodles tonight, or another attempt at that dangerous soup?"
+  - "{name}, I saved a twelve-second video specifically because it reminded me of you."
+  - "{name}, what food always improves a bad day for you?"
+  - "{name}, I tried changing a family recipe and now I may owe my ancestors an apology."
+  - "{name}, there is one snack left. I am pretending this is not a moral test."

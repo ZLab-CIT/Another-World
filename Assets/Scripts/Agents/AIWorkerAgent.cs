@@ -2,12 +2,32 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
 
+public sealed class ConversationIntent
+{
+    public string initiatorAgentId;
+    public string initiatorName;
+    public string intendedPartnerName;
+    public string topic;
+    public string openingLine;
+    public bool generatedByModel;
+    public OfficeActionType actionType;
+    public float createdAt;
+    public float expiresAt;
+
+    public bool IsValid(float now)
+    {
+        return !string.IsNullOrWhiteSpace(openingLine) && now <= expiresAt;
+    }
+}
+
 [RequireComponent(typeof(Rigidbody2D))]
 [RequireComponent(typeof(Collider2D))]
 [RequireComponent(typeof(OfficeWorkerMotor2D))]
 [RequireComponent(typeof(AgentPresentation2D))]
 [RequireComponent(typeof(AgentConversationController))]
 [RequireComponent(typeof(AgentNavigationController))]
+
+[RequireComponent(typeof(AgentEffects))]
 public class AIWorkerAgent : MonoBehaviour
 {
     private enum WorkerState
@@ -55,22 +75,19 @@ public class AIWorkerAgent : MonoBehaviour
     [Tooltip("Distance from the action slot where the worker can start acting.")]
     public float slotArriveDistance = 0.16f;
 
-    [Header("LLM Brain (optional)")]
-    [Tooltip("If on, the agent periodically asks the LLM what to do, guided by its personality. Falls back to utility scoring when the LLM is unavailable or slow.")]
+    [Header("LLM Social Planning (optional)")]
+    [Tooltip("If on, the LLM chooses a partner, subject, and opening before this worker travels to a social point. Ordinary actions continue to use fast utility AI.")]
     public bool useLLMBrain = false;
-    [Tooltip("Minimum seconds between LLM queries for this agent.")]
+    [Tooltip("Minimum seconds between generated social plans for this agent.")]
     public float brainDecisionInterval = 20f;
-    [Tooltip("How long an LLM-chosen directive stays valid before reverting to utility scoring.")]
-    public float brainDirectiveTtl = 30f;
-    [Tooltip("Log each LLM decision and reason to the console for tuning.")]
-    [SerializeField] private bool logBrainDecisions = false;
-    [Tooltip("Show private LLM decision reasons for non-social actions. Keep off if you only want spoken dialogue.")]
-    public bool showDecisionThoughtBubbles = false;
+    [Tooltip("How long a planned conversation invitation remains valid.")]
+    [Min(15f)] public float brainDirectiveTtl = 45f;
 
     private Rigidbody2D rb;
     private OfficeWorkerMotor2D motor;
     private AgentPresentation2D presentation;
     private AgentConversationController conversation;
+    private AgentEffects effects;
     private AgentNavigationController navigation;
     private OfficeCrowdCoordinator2D crowd;
     private OfficeActionPoint[] actionPoints;
@@ -78,25 +95,19 @@ public class AIWorkerAgent : MonoBehaviour
     private WorkerState state = WorkerState.Thinking;
     private float stateTimer;
 
-    private string brainDirectiveActionId;
-    private string brainDirectiveTargetAgent;
-    private string brainDirectiveReason;
-    private string pendingBrainThought;
-    private float brainDirectiveExpiry = -1f;
-    private float nextBrainQueryTime;
-    private bool brainQueryInFlight;
+    private ConversationIntent conversationIntent;
+    private float socialArrivalTime = -1f;
+    private bool socialPlanInFlight;
+    private OfficeActionPoint pendingSocialPlanAction;
+    private float nextSocialPlanTime;
+    private OfficeActionPoint invitedSocialAction;
+    private string invitedBy;
+    private float invitationExpiry = -1f;
 
     private OfficeActionPoint currentAction;
     private OfficeActionPoint lastFinishedDesk;
     private string lastActionLabel;
     private bool stillSeated;
-
-    private float speedBuffMultiplier = 1f;
-    private float speedBuffUntil = -1f;
-    private float energyDecayMult = 1f;
-    private float focusDecayMult = 1f;
-    private float socialDecayMult = 1f;
-    private float decayOverrideUntil = -1f;
 
     public OfficeGrid2D Grid => grid;
     public string AgentId => profile != null && !string.IsNullOrEmpty(profile.AgentId) ? profile.AgentId : name;
@@ -105,6 +116,47 @@ public class AIWorkerAgent : MonoBehaviour
         ? profile.AgentType
         : inferredAgentType;
     public bool UseLLMBrain => useLLMBrain;
+    public float SecondsAtSocialPoint => socialArrivalTime < 0f ? 0f : Time.time - socialArrivalTime;
+    public int ConversationStarterCount => profile != null ? profile.ConversationStarterCount : 0;
+
+    public string GetConversationSummary()
+    {
+        return profile != null ? profile.BuildConversationSummary() : DisplayName;
+    }
+
+    public string GetEstablishedRelationships()
+    {
+        return profile != null ? profile.BuildRelationshipSummary() : "";
+    }
+
+    public int ScoreConversationTopic(string topic)
+    {
+        return profile != null ? profile.ScoreTopicRelevance(topic) : 0;
+    }
+
+    public ConversationIntent GetConversationIntent(OfficeActionPoint action)
+    {
+        if (action == null || conversationIntent == null || !conversationIntent.IsValid(Time.time)
+            || conversationIntent.actionType != action.actionType)
+            return null;
+
+        return conversationIntent;
+    }
+
+    public string GetExpectedSocialPartner(OfficeActionPoint action)
+    {
+        if (action == null || invitedSocialAction != action || Time.time > invitationExpiry
+            || string.IsNullOrWhiteSpace(invitedBy))
+            return "";
+        return invitedBy;
+    }
+
+    public string GetConversationStarter(string partnerName, int variation)
+    {
+        return profile != null
+            ? profile.GetConversationStarter(partnerName, variation)
+            : "Do you have a minute, " + partnerName + "?";
+    }
 
     private void Awake()
     {
@@ -112,6 +164,7 @@ public class AIWorkerAgent : MonoBehaviour
         motor = GetComponent<OfficeWorkerMotor2D>();
         presentation = GetComponent<AgentPresentation2D>();
         conversation = GetComponent<AgentConversationController>();
+        effects = GetComponent<AgentEffects>();
         navigation = GetComponent<AgentNavigationController>();
     }
 
@@ -135,7 +188,7 @@ public class AIWorkerAgent : MonoBehaviour
 
     private void Update()
     {
-        TickNeeds(Time.deltaTime);
+        effects.TickNeeds(Time.deltaTime);
 
         switch (state)
         {
@@ -156,7 +209,7 @@ public class AIWorkerAgent : MonoBehaviour
                     FinishAction();
                 }
                 else
-                    conversation.Tick(currentAction, brainDirectiveReason);
+                    conversation.Tick(currentAction);
                 break;
         }
         UpdatePresentation();
@@ -172,24 +225,15 @@ public class AIWorkerAgent : MonoBehaviour
     {
         return rb != null ? rb.position : (Vector2)transform.position;
     }
-    private void TickNeeds(float deltaTime)
+
+    public bool IsActingAt(OfficeActionPoint action)
     {
-        bool decayOverridden = Time.time < decayOverrideUntil;
-        float energyRate = decayOverridden ? energyDecay * energyDecayMult : energyDecay;
-        float focusRate = decayOverridden ? focusDecay * focusDecayMult : focusDecay;
-        float socialRate = decayOverridden ? socialDecay * socialDecayMult : socialDecay;
-        energy = Mathf.Clamp(energy - energyRate * deltaTime, 0f, 100f);
-        focus = Mathf.Clamp(focus - focusRate * deltaTime, 0f, 100f);
-        social = Mathf.Clamp(social - socialRate * deltaTime, 0f, 100f);
+        return action != null && state == WorkerState.Acting && currentAction == action;
     }
 
     private void RefreshActionPoints()
     {
-#if UNITY_2023_1_OR_NEWER
-        actionPoints = FindObjectsByType<OfficeActionPoint>(FindObjectsSortMode.None);
-#else
         actionPoints = FindObjectsOfType<OfficeActionPoint>();
-#endif
     }
 
     private void DecideNextAction()
@@ -204,36 +248,199 @@ public class AIWorkerAgent : MonoBehaviour
         if (actionPoints == null || actionPoints.Length == 0)
             RefreshActionPoints();
 
-        MaybeQueryBrain();
+        if (socialPlanInFlight)
+        {
+            stateTimer = 0.25f;
+            return;
+        }
 
-        pendingBrainThought = null;
-        OfficeActionPoint bestAction = PickBrainAction();
+        OfficeActionPoint bestAction = GetValidInvitation();
+        bool acceptingInvitation = bestAction != null;
+        bestAction ??= PickUtilityAction();
+
         if (bestAction == null)
-            bestAction = PickUtilityAction();
-
-        if (bestAction == null || !bestAction.TryReserve(this))
         {
             stateTimer = decisionDelay;
             return;
         }
 
-        currentAction = bestAction;
+        if (AgentConversationController.IsSocialSpot(bestAction.actionType)
+            && !acceptingInvitation
+            && GetConversationIntent(bestAction) == null)
+        {
+            BeginSocialPlanning(bestAction);
+            return;
+        }
 
-        if (stillSeated && bestAction == lastFinishedDesk)
+        TryStartAction(bestAction);
+    }
+
+    private bool TryStartAction(OfficeActionPoint action)
+    {
+        if (action == null || !action.TryReserve(this))
+        {
+            stateTimer = decisionDelay;
+            return false;
+        }
+
+        currentAction = action;
+
+        if (stillSeated && action == lastFinishedDesk)
         {
             stillSeated = false;
             StartActing();
-            return;
+            return true;
         }
 
         stillSeated = false;
         if (!navigation.Plan(currentAction))
         {
             AbortMovement();
-            return;
+            return false;
         }
 
         state = WorkerState.Moving;
+        return true;
+    }
+
+    private OfficeActionPoint GetValidInvitation()
+    {
+        if (invitedSocialAction == null || Time.time > invitationExpiry)
+        {
+            ClearInvitation();
+            return null;
+        }
+        return invitedSocialAction;
+    }
+
+    private async void BeginSocialPlanning(OfficeActionPoint action)
+    {
+        if (action == null || socialPlanInFlight)
+            return;
+
+        List<AIWorkerAgent> candidates = conversation.FindPotentialPartners(action);
+        if (candidates.Count == 0)
+        {
+            stateTimer = decisionDelay;
+            return;
+        }
+
+        socialPlanInFlight = true;
+        pendingSocialPlanAction = action;
+        stateTimer = 0.25f;
+        ConversationPlan plan = null;
+        LLMBrainService brain = LLMBrainService.Instance;
+
+        if (useLLMBrain && brain != null && brain.EnableGeneratedConversationPlans
+            && Time.time >= nextSocialPlanTime)
+        {
+            List<ConversationParticipantContext> coworkerContexts = new();
+            foreach (AIWorkerAgent candidate in candidates)
+            {
+                if (candidate != null && candidate.TryGetComponent(
+                        out AgentConversationController candidateConversation))
+                    coworkerContexts.Add(candidateConversation.BuildParticipantContext());
+            }
+
+            plan = await brain.PlanConversationAsync(AgentId, action.actionType,
+                coworkerContexts, conversation.BuildRelationships(), BuildSocialState());
+            nextSocialPlanTime = Time.time + Mathf.Max(8f, brainDecisionInterval);
+        }
+
+        if (this == null)
+            return;
+
+        float expiresAt = Time.time + Mathf.Max(15f, brainDirectiveTtl);
+        ConversationIntent intent = null;
+        if (plan != null)
+        {
+            AIWorkerAgent target = FindCandidate(candidates, plan.targetAgent);
+            if (target != null)
+            {
+                intent = new ConversationIntent
+                {
+                    initiatorAgentId = AgentId,
+                    initiatorName = DisplayName,
+                    intendedPartnerName = target.DisplayName,
+                    topic = plan.topic,
+                    openingLine = plan.openingLine,
+                    generatedByModel = true,
+                    actionType = action.actionType,
+                    createdAt = Time.time,
+                    expiresAt = expiresAt
+                };
+            }
+        }
+        intent ??= conversation.CreateLocalConversationIntent(action, expiresAt);
+
+        socialPlanInFlight = false;
+        pendingSocialPlanAction = null;
+        if (intent == null)
+        {
+            stateTimer = decisionDelay;
+            return;
+        }
+
+        conversationIntent = intent;
+        AIWorkerAgent invited = FindCandidate(candidates, intent.intendedPartnerName);
+        invited?.ReceiveSocialInvitation(action, DisplayName, expiresAt);
+
+        string source = intent.generatedByModel ? "AI" : "local";
+        Debug.Log("[Conversation intent - " + source + "] " + DisplayName + " -> " +
+            intent.intendedPartnerName + ": " + intent.topic, this);
+
+        if (!TryStartAction(action))
+            conversationIntent = null;
+    }
+
+    private static AIWorkerAgent FindCandidate(List<AIWorkerAgent> candidates, string displayName)
+    {
+        if (candidates == null || string.IsNullOrWhiteSpace(displayName))
+            return null;
+        foreach (AIWorkerAgent candidate in candidates)
+        {
+            if (candidate == null || !string.Equals(candidate.DisplayName, displayName,
+                    System.StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (candidate.TryGetComponent(out AgentConversationController controller)
+                && controller.IsInConversation)
+                continue;
+            return candidate;
+        }
+        return null;
+    }
+
+    private string BuildSocialState()
+    {
+        string mood = energy < 25f ? "tired"
+            : focus < 25f ? "distracted"
+            : social < 25f ? "lonely"
+            : energy > 75f && focus > 70f ? "energetic"
+            : "fairly neutral";
+        return mood + (string.IsNullOrWhiteSpace(lastActionLabel)
+            ? ""
+            : "; just finished: " + lastActionLabel);
+    }
+
+    public void ReceiveSocialInvitation(OfficeActionPoint action, string inviterName, float expiresAt)
+    {
+        if (action == null || string.IsNullOrWhiteSpace(inviterName) || expiresAt <= Time.time)
+            return;
+        if (conversationIntent != null && conversationIntent.IsValid(Time.time))
+            return;
+
+        invitedSocialAction = action;
+        invitedBy = inviterName.Trim();
+        invitationExpiry = expiresAt;
+        if (state == WorkerState.Thinking)
+            stateTimer = 0f;
+    }
+
+    private void ClearInvitation()
+    {
+        invitedSocialAction = null;
+        invitedBy = "";
+        invitationExpiry = -1f;
     }
 
     private OfficeActionPoint PickUtilityAction()
@@ -267,177 +474,26 @@ public class AIWorkerAgent : MonoBehaviour
         return bestAction;
     }
 
-    private OfficeActionPoint PickBrainAction()
-    {
-        if (!useLLMBrain)
-            return null;
-
-        if (string.IsNullOrEmpty(brainDirectiveActionId) || Time.time > brainDirectiveExpiry)
-            return null;
-
-        if (!System.Enum.TryParse(brainDirectiveActionId, true, out OfficeActionType desiredType))
-            return null;
-
-        OfficeActionPoint result = null;
-
-        if (desiredType == OfficeActionType.WorkDesk && assignedDesk != null)
-        {
-            if (!assignedDesk.IsReservedByOther(this))
-                result = assignedDesk;
-        }
-        else
-        {
-            foreach (OfficeActionPoint actionPoint in actionPoints)
-            {
-                if (actionPoint == null || actionPoint.actionType != desiredType)
-                    continue;
-
-                if (actionPoint.IsReservedByOther(this))
-                    continue;
-
-                result = actionPoint;
-                break;
-            }
-        }
-
-        if (result != null)
-        {
-            pendingBrainThought = brainDirectiveReason;
-
-            // If heading to chat with a specific coworker, nudge them to come too
-            // so the two actually meet at the ChatSpot. Only genuine LLM decisions
-            // nudge (a nudge carries no line, so it won't recurse).
-            if (desiredType == OfficeActionType.ChatSpot
-                && !string.IsNullOrEmpty(brainDirectiveReason)
-                && !string.IsNullOrEmpty(brainDirectiveTargetAgent))
-            {
-                AIWorkerAgent named = conversation.FindWorkerByDisplayName(brainDirectiveTargetAgent);
-                if (named != null && named != this)
-                    named.NudgeToChat(DisplayName, 18f);
-            }
-        }
-
-        return result;
-    }
-
-    private async void MaybeQueryBrain()
-    {
-        if (!useLLMBrain || brainQueryInFlight || Time.time < nextBrainQueryTime)
-            return;
-
-        LLMBrainService brain = LLMBrainService.Instance;
-        if (brain == null)
-            return;
-
-        brainQueryInFlight = true;
-        nextBrainQueryTime = Time.time + brainDecisionInterval;
-
-        AgentStateSnapshot snapshot = new()
-        {
-            energy = energy,
-            focus = focus,
-            social = social,
-            productivity = productivity,
-            mood = DeriveMood(),
-            lastAction = lastActionLabel ?? "",
-            relationships = conversation.BuildRelationships(),
-            coworkers = BuildCoworkerList()
-        };
-
-        List<ActionOption> options = BuildActionOptions();
-
-        try
-        {
-            AgentDecision decision = await brain.ChooseActionAsync(AgentId, snapshot, options);
-            if (decision != null && !string.IsNullOrEmpty(decision.actionId))
-            {
-                brainDirectiveActionId = decision.actionId;
-                brainDirectiveTargetAgent = decision.targetAgent ?? "";
-                brainDirectiveReason = decision.reason ?? "";
-                brainDirectiveExpiry = Time.time + brainDirectiveTtl;
-
-                if (logBrainDecisions)
-                {
-                    string with = string.IsNullOrEmpty(decision.targetAgent) ? "" : " with " + decision.targetAgent;
-                    string because = string.IsNullOrEmpty(decision.reason) ? "" : " — " + decision.reason;
-                    Debug.Log($"[{DisplayName}] LLM chose {decision.actionId}{with}{because}");
-                }
-            }
-        }
-        catch
-        {
-            // Swallow: utility scoring remains the fallback.
-        }
-        finally
-        {
-            brainQueryInFlight = false;
-        }
-    }
-
     private void RegisterBrainProfile()
     {
         LLMBrainService brain = LLMBrainService.Ensure();
-        if (brain == null || brain.GetProfile(AgentId) != null)
+        if (brain == null)
             return;
 
-        brain.RegisterProfile(new AgentProfile
+        AgentProfile runtimeProfile = brain.GetProfile(AgentId) ?? new AgentProfile();
+        runtimeProfile.agentId = AgentId;
+        runtimeProfile.displayName = DisplayName;
+        runtimeProfile.personality = profile != null ? profile.BuildPromptDescription() : "";
+        runtimeProfile.birthday = profile != null ? profile.Birthday : "";
+        brain.RegisterProfile(runtimeProfile);
+
+        if (profile == null)
+            return;
+        foreach (string memory in profile.MemorySeeds)
         {
-            agentId = AgentId,
-            displayName = DisplayName,
-            personality = profile != null ? profile.BuildPromptDescription() : ""
-        });
-    }
-
-    private string DeriveMood()
-    {
-        if (energy < 25f) return "tired";
-        if (focus < 25f) return "unfocused";
-        if (social < 25f) return "lonely";
-        if (energy > 75f && focus > 75f && social > 60f) return "content";
-        return "neutral";
-    }
-
-    private string BuildCoworkerList()
-    {
-        if (crowd == null || crowd.Workers.Count <= 1)
-            return "";
-
-        string result = "";
-        for (int i = 0; i < crowd.Workers.Count; i++)
-        {
-            AIWorkerAgent worker = crowd.Workers[i];
-            if (worker == null || worker == this)
-                continue;
-
-            if (result.Length > 0)
-                result += ", ";
-            result += worker.DisplayName;
+            if (!string.IsNullOrWhiteSpace(memory))
+                brain.Remember(AgentId, memory);
         }
-
-        return result;
-    }
-
-    private List<ActionOption> BuildActionOptions()
-    {
-        List<ActionOption> options = new();
-        HashSet<OfficeActionType> seen = new();
-
-        if (actionPoints != null)
-        {
-            foreach (OfficeActionPoint actionPoint in actionPoints)
-            {
-                if (actionPoint == null || !seen.Add(actionPoint.actionType))
-                    continue;
-
-                options.Add(new ActionOption
-                {
-                    actionId = actionPoint.actionType.ToString(),
-                    label = GetActionLabel(actionPoint.actionType)
-                });
-            }
-        }
-
-        return options;
     }
 
     private static string GetActionLabel(OfficeActionType type)
@@ -476,34 +532,22 @@ public class AIWorkerAgent : MonoBehaviour
         navigation.Clear();
         state = WorkerState.Acting;
         stateTimer = currentAction != null ? currentAction.useTime : 1f;
+        socialArrivalTime = currentAction != null && AgentConversationController.IsSocialSpot(currentAction.actionType)
+            ? Time.time
+            : -1f;
 
         // Waiting for someone to chat with: linger longer so they can arrive.
         if (currentAction != null && AgentConversationController.IsSocialSpot(currentAction.actionType)
-            && !string.IsNullOrEmpty(brainDirectiveReason))
+            && (GetConversationIntent(currentAction) != null
+                || !string.IsNullOrWhiteSpace(GetExpectedSocialPartner(currentAction))))
         {
-            stateTimer = Mathf.Max(stateTimer, 20f);
+            stateTimer = Mathf.Max(stateTimer, 40f);
         }
 
         if (currentAction != null)
             presentation.SetFacing(currentAction.GetFacingVector(this));
 
-        if (presentation.ThoughtBubblesEnabled && showDecisionThoughtBubbles && !string.IsNullOrEmpty(pendingBrainThought)
-            && currentAction != null && !AgentConversationController.IsSocialSpot(currentAction.actionType))
-        {
-            string label = GetActionLabel(currentAction.actionType);
-            presentation.ShowThought($"{DisplayName} · {label}\n{pendingBrainThought}");
-        }
-        pendingBrainThought = null;
-
-        conversation.OnStartedActing(currentAction, brainDirectiveReason);
-    }
-
-    public void NudgeToChat(string partnerName, float ttl)
-    {
-        brainDirectiveActionId = OfficeActionType.ChatSpot.ToString();
-        brainDirectiveTargetAgent = partnerName ?? "";
-        brainDirectiveReason = "";
-        brainDirectiveExpiry = Time.time + ttl;
+        conversation.OnStartedActing(currentAction);
     }
 
     public void ExtendActing(float seconds)
@@ -514,13 +558,21 @@ public class AIWorkerAgent : MonoBehaviour
 
     public void ClearConversationDirective()
     {
-        brainDirectiveTargetAgent = "";
-        brainDirectiveReason = "";
-        brainDirectiveActionId = "";
+        conversationIntent = null;
+        socialArrivalTime = -1f;
+        ClearInvitation();
     }
+
     public void ShowThought(string content)
     {
-        presentation.ShowThought(content);
+        if (presentation != null)
+            presentation.ShowThought(content);
+    }
+
+    public void HideThought()
+    {
+        if (presentation != null)
+            presentation.HideThought();
     }
 
     private void FinishAction()
@@ -538,6 +590,8 @@ public class AIWorkerAgent : MonoBehaviour
             }
 
             lastActionLabel = GetActionLabel(finishedAction.actionType);
+            if (AgentConversationController.IsSocialSpot(finishedAction.actionType))
+                ClearConversationDirective();
 
             PhysicalVirtualInteractionBridge bridge = PhysicalVirtualInteractionBridge.Instance;
             if (bridge != null)
@@ -557,14 +611,13 @@ public class AIWorkerAgent : MonoBehaviour
             currentAction = null;
         }
 
-        pendingBrainThought = null;
-
         ReturnToThinking();
     }
 
     private void ReturnToThinking()
     {
         navigation.Clear();
+        socialArrivalTime = -1f;
         state = WorkerState.Thinking;
         stateTimer = decisionDelay;
     }
@@ -587,7 +640,7 @@ public class AIWorkerAgent : MonoBehaviour
         if (actionPoint.socialChange > 0f) score += actionPoint.socialChange * socialUrgency * 3f;
 
         if (actionPoint.CurrentUsers > 0 && actionPoint.actionType == OfficeActionType.ChatSpot)
-            score += 40f;
+            score += 12f;
 
         if (actionPoint.actionType == OfficeActionType.WorkDesk)
         {
@@ -608,49 +661,22 @@ public class AIWorkerAgent : MonoBehaviour
         float socialChange,
         float productivityChange)
     {
-        energy = Mathf.Clamp(energy + energyChange, 0f, 100f);
-        focus = Mathf.Clamp(focus + focusChange, 0f, 100f);
-        social = Mathf.Clamp(social + socialChange, 0f, 100f);
-        productivity = Mathf.Max(0f, productivity + productivityChange);
-
-        PhysicalVirtualInteractionBridge bridge = PhysicalVirtualInteractionBridge.Instance;
-        if (bridge != null)
-            bridge.EvaluateProductivityMilestone();
+        effects.Apply(energyChange, focusChange, socialChange, productivityChange);
     }
 
     public float EffectiveSpeedMultiplier
     {
-        get { return Time.time < speedBuffUntil ? speedBuffMultiplier : 1f; }
+        get { return effects != null ? effects.EffectiveSpeedMultiplier : 1f; }
     }
 
     public void ApplySpeedBuff(float multiplier, float duration)
     {
-        if (duration <= 0f)
-            return;
-
-        speedBuffMultiplier = Mathf.Max(0f, multiplier);
-        speedBuffUntil = Time.time + duration;
+        effects.ApplySpeed(multiplier, duration);
     }
 
     public void ApplyDecayOverride(float energyMult, float focusMult, float socialMult, float duration)
     {
-        if (duration <= 0f)
-            return;
-
-        energyDecayMult = Mathf.Max(0f, energyMult);
-        focusDecayMult = Mathf.Max(0f, focusMult);
-        socialDecayMult = Mathf.Max(0f, socialMult);
-        decayOverrideUntil = Time.time + duration;
-    }
-
-    public void StartDance(float duration)
-    {
-        presentation.StartDance(duration);
-    }
-
-    public void ApplyHat(Sprite hatSprite, Vector3 localOffset, Vector3 sittingLocalOffset, Vector3 localScale)
-    {
-        presentation.ApplyHat(hatSprite, localOffset, sittingLocalOffset, localScale);
+        effects.ApplyDecayOverride(energyMult, focusMult, socialMult, duration);
     }
 
     private void UpdatePresentation()

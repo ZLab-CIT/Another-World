@@ -25,26 +25,18 @@ public class VendingEventDispatcher : MonoBehaviour
     [Header("Gacha Weights (mixed-roll per press)")]
     [Tooltip("Base weight for buff (Category A) events. Higher = buffs appear more often.")]
     [SerializeField] private float buffEventWeight = 100f;
-    [SerializeField] private float commonCosmeticWeight = 8f;
-    [SerializeField] private float rareCosmeticWeight = 3f;
-    [SerializeField] private float epicCosmeticWeight = 1f;
-    [SerializeField] private float legendaryCosmeticWeight = 0.3f;
+    [SerializeField] private float commonGachaWeight = 8f;
+    [SerializeField] private float rareGachaWeight = 3f;
+    [SerializeField] private float epicGachaWeight = 1f;
+    [SerializeField] private float legendaryGachaWeight = 0.3f;
 
     private static Sprite cachedWhiteSprite;
 
     private VendingMachineAvatar machineAvatar;
     private Sprite[] fallbackDropSprites;
+    private readonly VendingEventCatalog catalog = new();
 
     public IReadOnlyList<VendingEventSO> Events => events;
-
-    public static VendingEventDispatcher Ensure()
-    {
-        if (Instance != null)
-            return Instance;
-
-        GameObject go = new(nameof(VendingEventDispatcher));
-        return go.AddComponent<VendingEventDispatcher>();
-    }
 
     private void Awake()
     {
@@ -58,7 +50,9 @@ public class VendingEventDispatcher : MonoBehaviour
 
         events ??= new List<VendingEventSO>();
 
-        LoadEventAssets();
+        catalog.LoadFromResources("VendingEvents");
+        events.Clear();
+        events.AddRange(catalog.Events);
 
         if (hatCatalog == null)
             hatCatalog = Resources.Load<HatCatalogSO>("VendingEvents/HatCatalog");
@@ -74,72 +68,6 @@ public class VendingEventDispatcher : MonoBehaviour
             announcer = FindFirstObjectByType<VendingEventAnnouncer>();
     }
 
-    public void TriggerBuffEvent()
-    {
-        if (events == null || events.Count == 0)
-            return;
-
-        List<VendingEventSO> pool = new();
-        foreach (VendingEventSO evt in events)
-        {
-            if (evt != null && evt.cosmeticType == VendingCosmeticType.None)
-                pool.Add(evt);
-        }
-
-        if (pool.Count == 0)
-        {
-            TriggerRandomEvent();
-            return;
-        }
-
-        TriggerEvent(PickWeighted(pool));
-    }
-
-    public void TriggerRandomEvent()
-    {
-        if (events == null || events.Count == 0)
-            return;
-
-        TriggerEvent(PickWeighted(events));
-    }
-
-    public void TriggerGachaEvent()
-    {
-        if (events == null || events.Count == 0)
-            return;
-
-        List<VendingEventSO> pool = new();
-        foreach (VendingEventSO evt in events)
-        {
-            if (evt != null && evt.cosmeticType != VendingCosmeticType.None)
-                pool.Add(evt);
-        }
-
-        if (pool.Count == 0)
-        {
-            TriggerRandomEvent();
-            return;
-        }
-
-        TriggerEvent(PickWeighted(pool));
-    }
-
-    public void TriggerHatEvent()
-    {
-        events ??= new List<VendingEventSO>();
-
-        foreach (VendingEventSO evt in events)
-        {
-            if (evt != null && evt.cosmeticType == VendingCosmeticType.AgentHat)
-            {
-                TriggerEvent(evt);
-                return;
-            }
-        }
-
-        Debug.LogWarning(nameof(VendingEventDispatcher) + ": no hat event asset was found.");
-    }
-
     public void TriggerEvent(VendingEventSO evt)
     {
         if (evt == null)
@@ -148,18 +76,14 @@ public class VendingEventDispatcher : MonoBehaviour
         StartCoroutine(RunEvent(evt));
     }
 
-    public VendingEventSO FindEventById(string eventId)
+    public VendingEventSO FindEventByProductId(string productId)
     {
-        if (string.IsNullOrEmpty(eventId) || events == null)
-            return null;
+        return catalog.FindByProductId(productId);
+    }
 
-        foreach (VendingEventSO evt in events)
-        {
-            if (evt != null && evt.eventId == eventId)
-                return evt;
-        }
-
-        return null;
+    public VendingEventSO PickEvent(bool cosmetic)
+    {
+        return catalog.PickWeighted(evt => (evt is IVendingGachaEvent) == cosmetic, GetEventWeight);
     }
 
     public void ShowOfflineCoupon(string userId, OfflineCouponReward reward)
@@ -179,9 +103,10 @@ public class VendingEventDispatcher : MonoBehaviour
 
     private IEnumerator RunEvent(VendingEventSO evt)
     {
+        LLMBrainService.Instance?.RememberWorldEvent(evt.displayName + ": " + evt.description);
         string subtitle = evt.description;
-        if (evt.cosmeticType != VendingCosmeticType.None)
-            subtitle = evt.rarity.ToString().ToUpperInvariant() + " \u2014 " + evt.description;
+        if (evt is IVendingGachaEvent gacha)
+            subtitle = gacha.Rarity.ToString().ToUpperInvariant() + " \u2014 " + evt.description;
 
         if (announcer != null)
             announcer.Show(evt.displayName, subtitle, evt.icon, evt.announceDuration);
@@ -189,55 +114,42 @@ public class VendingEventDispatcher : MonoBehaviour
         if (evt.announceDuration > 0f)
             yield return new WaitForSeconds(evt.announceDuration);
 
-        List<AIWorkerAgent> targets = ResolveTargets(evt);
+        List<AIWorkerAgent> targets = VendingTargetResolver.Resolve(evt, hatCatalog);
 
-        PlayMachineReaction(evt, targets);
+        if (evt is VendingBuffEventSO buff)
+            PlayMachineReaction(buff, targets);
         ApplyCosmetic(evt, targets);
 
         if (targets.Count == 0)
             yield break;
 
-        foreach (AIWorkerAgent agent in targets)
+        if (evt is VendingBuffEventSO buffEvent)
         {
-            if (agent == null)
-                continue;
-
-            agent.ApplyEffects(
-                evt.energyChange,
-                evt.focusChange,
-                evt.socialChange,
-                evt.productivityChange);
-
-            if (evt.speedMultiplier != 1f && evt.speedBuffDuration > 0f)
-                agent.ApplySpeedBuff(evt.speedMultiplier, evt.speedBuffDuration);
-
-            if (evt.decayOverrideDuration > 0f &&
-                (evt.energyDecayMultiplier != 1f ||
-                 evt.focusDecayMultiplier != 1f ||
-                 evt.socialDecayMultiplier != 1f))
-            {
-                agent.ApplyDecayOverride(
-                    evt.energyDecayMultiplier,
-                    evt.focusDecayMultiplier,
-                    evt.socialDecayMultiplier,
-                    evt.decayOverrideDuration);
-            }
-        }
-
-        if (evt.speedBuffDuration > 0f &&
-            (evt.postEnergyChange != 0f || evt.postFocusChange != 0f ||
-             evt.postSocialChange != 0f || evt.postProductivityChange != 0f))
-        {
-            yield return new WaitForSeconds(evt.speedBuffDuration);
-
             foreach (AIWorkerAgent agent in targets)
             {
-                if (agent != null)
-                    agent.ApplyEffects(
-                        evt.postEnergyChange,
-                        evt.postFocusChange,
-                        evt.postSocialChange,
-                        evt.postProductivityChange);
+                if (agent == null)
+                    continue;
+
+                agent.ApplyEffects(buffEvent.energyChange, buffEvent.focusChange,
+                    buffEvent.socialChange, buffEvent.productivityChange);
+                if (buffEvent.speedMultiplier != 1f && buffEvent.speedBuffDuration > 0f)
+                    agent.ApplySpeedBuff(buffEvent.speedMultiplier, buffEvent.speedBuffDuration);
+                if (buffEvent.decayOverrideDuration > 0f &&
+                    (buffEvent.energyDecayMultiplier != 1f || buffEvent.focusDecayMultiplier != 1f ||
+                     buffEvent.socialDecayMultiplier != 1f))
+                    agent.ApplyDecayOverride(buffEvent.energyDecayMultiplier, buffEvent.focusDecayMultiplier,
+                        buffEvent.socialDecayMultiplier, buffEvent.decayOverrideDuration);
+            }
+
+            if (buffEvent.speedBuffDuration > 0f &&
+                (buffEvent.postEnergyChange != 0f || buffEvent.postFocusChange != 0f ||
+                 buffEvent.postSocialChange != 0f || buffEvent.postProductivityChange != 0f))
+            {
+                yield return new WaitForSeconds(buffEvent.speedBuffDuration);
+                foreach (AIWorkerAgent agent in targets)
+                    if (agent != null)
+                        agent.ApplyEffects(buffEvent.postEnergyChange, buffEvent.postFocusChange,
+                            buffEvent.postSocialChange, buffEvent.postProductivityChange);
             }
         }
     }
@@ -246,10 +158,10 @@ public class VendingEventDispatcher : MonoBehaviour
     {
         switch (rarity)
         {
-            case VendingRarity.Rare: return rareCosmeticWeight;
-            case VendingRarity.Epic: return epicCosmeticWeight;
-            case VendingRarity.Legendary: return legendaryCosmeticWeight;
-            default: return commonCosmeticWeight;
+            case VendingRarity.Rare: return rareGachaWeight;
+            case VendingRarity.Epic: return epicGachaWeight;
+            case VendingRarity.Legendary: return legendaryGachaWeight;
+            default: return commonGachaWeight;
         }
     }
 
@@ -258,50 +170,34 @@ public class VendingEventDispatcher : MonoBehaviour
         if (evt == null)
             return 0f;
 
-        return evt.cosmeticType == VendingCosmeticType.None
-            ? buffEventWeight
-            : GetCosmeticRarityWeight(evt.rarity);
-    }
-
-    private VendingEventSO PickWeighted(List<VendingEventSO> pool)
-    {
-        float total = 0f;
-        foreach (VendingEventSO evt in pool)
-            total += GetEventWeight(evt);
-
-        if (total <= 0f)
-            return pool.Count > 0 ? pool[Random.Range(0, pool.Count)] : null;
-
-        float roll = Random.value * total;
-        foreach (VendingEventSO evt in pool)
-        {
-            roll -= GetEventWeight(evt);
-            if (roll <= 0f)
-                return evt;
-        }
-
-        return pool[pool.Count - 1];
+        return evt is IVendingGachaEvent gacha
+            ? GetCosmeticRarityWeight(gacha.Rarity)
+            : buffEventWeight;
     }
 
     private void ApplyCosmetic(VendingEventSO evt, List<AIWorkerAgent> targets)
     {
-        switch (evt.cosmeticType)
+        switch (evt)
         {
-            case VendingCosmeticType.FurnitureUnlock:
-                SpawnFurniture(evt, targets);
+            case VendingFurnitureEventSO furniture:
+                SpawnFurniture(furniture, targets);
                 break;
 
-            case VendingCosmeticType.ConfettiBurst:
-                StartCoroutine(ConfettiRain(Mathf.Max(evt.confettiCount, 160), Mathf.Max(evt.confettiDuration, 2f), evt.confettiSprite));
+            case VendingConfettiEventSO confetti:
+                StartCoroutine(ConfettiRain(Mathf.Max(confetti.count, 160), Mathf.Max(confetti.duration, 2f), confetti.sprite));
                 break;
 
-            case VendingCosmeticType.AgentHat:
+            case VendingHatEventSO:
                 if (targets.Count > 0 && targets[0] != null && hatCatalog != null)
                 {
                     HatCatalogSO.HatEntry hat = hatCatalog.PickRandomHat(targets[0].AgentType);
                     if (hat != null)
                     {
-                        targets[0].ApplyHat(hat.sprite, hat.localOffset, hat.sittingLocalOffset, hat.localScale);
+                        HatCatalogSO.HatPool pool = hatCatalog.GetPool(targets[0].AgentType);
+                        AgentCosmetics cosmetics = targets[0].GetComponent<AgentCosmetics>();
+                        if (cosmetics == null)
+                            cosmetics = targets[0].gameObject.AddComponent<AgentCosmetics>();
+                        cosmetics.ApplyHat(hat.sprite, pool, hat.localScale);
                         Sprite face = GetAgentIcon(targets[0]);
                         HighlightTransform(targets[0].transform, 3f);
                         if (announcer != null)
@@ -310,13 +206,10 @@ public class VendingEventDispatcher : MonoBehaviour
                 }
                 break;
 
-            case VendingCosmeticType.DiscoDance:
-                StartCoroutine(DiscoParty(evt, targets));
-                break;
         }
     }
 
-    private void SpawnFurniture(VendingEventSO evt, List<AIWorkerAgent> targets)
+    private void SpawnFurniture(VendingFurnitureEventSO evt, List<AIWorkerAgent> targets)
     {
         OfficeGrid2D grid = FindFirstObjectByType<OfficeGrid2D>();
         Vector3 position = ResolveFurniturePosition(evt, targets, grid);
@@ -336,7 +229,7 @@ public class VendingEventDispatcher : MonoBehaviour
             SpriteRenderer sr = furniture.AddComponent<SpriteRenderer>();
             Sprite furnitureSprite = PickSprite(evt.furnitureSprites);
             if (furnitureSprite == null)
-                furnitureSprite = evt.icon != null ? evt.icon : PickDropSprite(evt);
+                furnitureSprite = evt.icon;
             pickedSprite = furnitureSprite;
             sr.sprite = furnitureSprite != null ? furnitureSprite : GetWhiteSprite();
             sr.color = furnitureSprite != null
@@ -346,6 +239,8 @@ public class VendingEventDispatcher : MonoBehaviour
                     : evt.placeholderColor;
             sr.sortingOrder = dropSortingOrder + 5;
         }
+
+        furniture.transform.localScale *= Mathf.Max(0.01f, evt.furnitureScale);
 
         MakeDecorationOnly(furniture);
         furniture.name = "Furniture_" + socketId + "_" + evt.displayName;
@@ -364,7 +259,7 @@ public class VendingEventDispatcher : MonoBehaviour
         HighlightWorldPosition(position, 3.5f);
     }
 
-    private Vector3 ResolveFurniturePosition(VendingEventSO evt, List<AIWorkerAgent> targets, OfficeGrid2D grid)
+    private Vector3 ResolveFurniturePosition(VendingFurnitureEventSO evt, List<AIWorkerAgent> targets, OfficeGrid2D grid)
     {
         if (TryFindSocketPosition(evt, grid, out Vector3 socketPosition))
             return socketPosition;
@@ -380,7 +275,7 @@ public class VendingEventDispatcher : MonoBehaviour
         return basePos;
     }
 
-    private bool TryFindSocketPosition(VendingEventSO evt, OfficeGrid2D grid, out Vector3 result)
+    private bool TryFindSocketPosition(VendingFurnitureEventSO evt, OfficeGrid2D grid, out Vector3 result)
     {
         string socketId = ResolveSocketId(evt);
         if (TryFindNamedSocket(socketId, out result))
@@ -424,12 +319,12 @@ public class VendingEventDispatcher : MonoBehaviour
         return true;
     }
 
-    private static string ResolveSocketId(VendingEventSO evt)
+    private static string ResolveSocketId(VendingFurnitureEventSO evt)
     {
-        if (evt != null && !string.IsNullOrEmpty(evt.furnitureSocketId))
+        if (!string.IsNullOrEmpty(evt.furnitureSocketId))
             return evt.furnitureSocketId;
 
-        return evt != null ? evt.furnitureKind.ToString() : "";
+        return evt.furnitureKind.ToString();
     }
 
     private static Vector3 DefaultSocketPosition(UpgradeableFurnitureKind kind)
@@ -493,11 +388,7 @@ public class VendingEventDispatcher : MonoBehaviour
         }
 
         OfficeActionPoint[] actionPoints;
-#if UNITY_2023_1_OR_NEWER
-        actionPoints = FindObjectsByType<OfficeActionPoint>(FindObjectsSortMode.None);
-#else
         actionPoints = FindObjectsOfType<OfficeActionPoint>();
-#endif
         foreach (OfficeActionPoint actionPoint in actionPoints)
         {
             if (actionPoint != null && Vector2.Distance(actionPoint.transform.position, position) < 0.9f)
@@ -526,70 +417,12 @@ public class VendingEventDispatcher : MonoBehaviour
         if (string.IsNullOrEmpty(socketId))
             return;
 
-#if UNITY_2023_1_OR_NEWER
         FurnitureSocketItem[] items = FindObjectsByType<FurnitureSocketItem>(FindObjectsSortMode.None);
-#else
-        FurnitureSocketItem[] items = FindObjectsOfType<FurnitureSocketItem>();
-#endif
         foreach (FurnitureSocketItem item in items)
         {
             if (item != null && item.SocketId == socketId)
                 Destroy(item.gameObject);
         }
-    }
-
-    private IEnumerator DiscoParty(VendingEventSO evt, List<AIWorkerAgent> targets)
-    {
-        float duration = Mathf.Max(3f, evt.confettiDuration > 0f ? evt.confettiDuration : 4f);
-        List<AIWorkerAgent> dancers = targets;
-        if (dancers == null || dancers.Count == 0)
-        {
-            VendingEventSO allEvent = ScriptableObject.CreateInstance<VendingEventSO>();
-            allEvent.scope = VendingEventScope.AllAgents;
-            dancers = ResolveTargets(allEvent);
-            Destroy(allEvent);
-        }
-
-        foreach (AIWorkerAgent agent in dancers)
-        {
-            if (agent != null)
-                agent.StartDance(duration);
-        }
-
-        StartCoroutine(ConfettiRain(Mathf.Max(evt.confettiCount, 220), duration, evt.confettiSprite));
-        StartCoroutine(DiscoScreenTint(duration));
-
-        float interval = 0.45f;
-        float elapsed = 0f;
-        while (elapsed < duration)
-        {
-            elapsed += interval;
-            yield return new WaitForSeconds(interval);
-
-            StartCoroutine(ConfettiRain(36, 1.2f, evt.confettiSprite));
-        }
-    }
-
-    private IEnumerator DiscoScreenTint(float duration)
-    {
-        GameObject tint = new("Disco Screen Tint");
-        SpriteRenderer sr = tint.AddComponent<SpriteRenderer>();
-        sr.sprite = GetWhiteSprite();
-        sr.sortingOrder = dropSortingOrder + 100;
-
-        float elapsed = 0f;
-        while (elapsed < duration)
-        {
-            elapsed += Time.deltaTime;
-            FitToCamera(tint.transform);
-            Color color = Color.HSVToRGB(Mathf.Repeat(elapsed * 0.25f, 1f), 0.75f, 1f);
-            color.a = 0.12f + Mathf.Abs(Mathf.Sin(elapsed * 5.5f)) * 0.12f;
-            sr.color = color;
-            yield return null;
-        }
-
-        if (tint != null)
-            Destroy(tint);
     }
 
     private IEnumerator ConfettiRain(int count, float duration, Sprite sprite)
@@ -683,26 +516,6 @@ public class VendingEventDispatcher : MonoBehaviour
         return world;
     }
 
-    private static void FitToCamera(Transform target)
-    {
-        Camera cam = Camera.main;
-        if (cam == null)
-        {
-            target.position = Vector3.zero;
-            target.localScale = new Vector3(900f, 600f, 1f);
-            return;
-        }
-
-        float depth = Mathf.Abs(cam.transform.position.z);
-        Vector3 bottomLeft = cam.ViewportToWorldPoint(new Vector3(0f, 0f, depth));
-        Vector3 topRight = cam.ViewportToWorldPoint(new Vector3(1f, 1f, depth));
-        Vector3 center = (bottomLeft + topRight) * 0.5f;
-        center.z = 0f;
-
-        target.position = center;
-        target.localScale = new Vector3(Mathf.Abs(topRight.x - bottomLeft.x) * 100f, Mathf.Abs(topRight.y - bottomLeft.y) * 100f, 1f);
-    }
-
     private IEnumerator ConfettiBurst(Vector3 center, int count, float duration, Sprite sprite)
     {
         if (count <= 0 || duration <= 0f)
@@ -760,79 +573,6 @@ public class VendingEventDispatcher : MonoBehaviour
         }
     }
 
-    private List<AIWorkerAgent> ResolveTargets(VendingEventSO evt)
-    {
-        List<AIWorkerAgent> targets = new();
-
-        if (evt.cosmeticType == VendingCosmeticType.AgentHat)
-            return ResolveHatTargets();
-
-        OfficeCrowdCoordinator2D crowd = OfficeCrowdCoordinator2D.Instance;
-        if (crowd == null || crowd.Workers.Count == 0)
-            return targets;
-
-        switch (evt.scope)
-        {
-            case VendingEventScope.AllAgents:
-                foreach (AIWorkerAgent worker in crowd.Workers)
-                    if (worker != null)
-                        targets.Add(worker);
-                break;
-
-            case VendingEventScope.NearbyAgents:
-                AIWorkerAgent center = PickRandomWorker(crowd);
-                if (center != null)
-                {
-                    crowd.GetNearbyWorkers(center.GetPosition(), evt.nearbyRadius, center, targets);
-                    targets.Add(center);
-                }
-                break;
-
-            default:
-                AIWorkerAgent single = PickRandomWorker(crowd);
-                if (single != null)
-                    targets.Add(single);
-                break;
-        }
-
-        return targets;
-    }
-
-    private List<AIWorkerAgent> ResolveHatTargets()
-    {
-        List<AIWorkerAgent> targets = new();
-        if (hatCatalog == null)
-            return targets;
-
-        OfficeCrowdCoordinator2D crowd = OfficeCrowdCoordinator2D.Instance;
-        if (crowd == null || crowd.Workers.Count == 0)
-            return targets;
-
-        List<AIWorkerAgent> qualified = new();
-        foreach (AIWorkerAgent worker in crowd.Workers)
-        {
-            if (worker != null && hatCatalog.GetPool(worker.AgentType) != null)
-                qualified.Add(worker);
-        }
-
-        if (qualified.Count > 0)
-            targets.Add(qualified[Random.Range(0, qualified.Count)]);
-
-        return targets;
-    }
-
-    private static AIWorkerAgent PickRandomWorker(OfficeCrowdCoordinator2D crowd)
-    {
-        int count = crowd.Workers.Count;
-        for (int attempt = 0; attempt < count; attempt++)
-        {
-            AIWorkerAgent worker = crowd.Workers[Random.Range(0, count)];
-            if (worker != null)
-                return worker;
-        }
-        return null;
-    }
-
     private VendingMachineAvatar GetMachineAvatar()
     {
         if (machineAvatar != null)
@@ -842,11 +582,8 @@ public class VendingEventDispatcher : MonoBehaviour
         return machineAvatar;
     }
 
-    private void PlayMachineReaction(VendingEventSO evt, List<AIWorkerAgent> targets)
+    private void PlayMachineReaction(VendingBuffEventSO evt, List<AIWorkerAgent> targets)
     {
-        if (evt.cosmeticType != VendingCosmeticType.None)
-            return;
-
         VendingMachineAvatar avatar = GetMachineAvatar();
         if (avatar == null)
         {
@@ -863,7 +600,7 @@ public class VendingEventDispatcher : MonoBehaviour
             HighlightTransform(targets[0].transform, Mathf.Min(Mathf.Max(1.6f, evt.dropLifetime), 4f));
     }
 
-    private void SpawnDrop(VendingEventSO evt, List<AIWorkerAgent> targets)
+    private void SpawnDrop(VendingBuffEventSO evt, List<AIWorkerAgent> targets)
     {
         Sprite sprite = PickDropSprite(evt);
         if (sprite == null)
@@ -991,7 +728,7 @@ public class VendingEventDispatcher : MonoBehaviour
         return cachedWhiteSprite;
     }
 
-    private static Sprite PickDropSprite(VendingEventSO evt)
+    private static Sprite PickDropSprite(VendingBuffEventSO evt)
     {
         if (evt == null)
             return null;
@@ -1007,9 +744,9 @@ public class VendingEventDispatcher : MonoBehaviour
             List<Sprite> pool = new();
             if (events != null)
             {
-                foreach (VendingEventSO e in events)
+                foreach (VendingEventSO candidate in events)
                 {
-                    if (e == null)
+                    if (candidate is not VendingBuffEventSO e)
                         continue;
 
                     if (e.dropSprites != null && e.dropSprites.Length > 0)
@@ -1051,39 +788,6 @@ public class VendingEventDispatcher : MonoBehaviour
             return null;
 
         return available[Random.Range(0, available.Count)];
-    }
-
-    private void LoadEventAssets()
-    {
-        VendingEventSO[] loaded = Resources.LoadAll<VendingEventSO>("VendingEvents");
-        events.Clear();
-        if (loaded == null || loaded.Length == 0)
-        {
-            Debug.LogWarning(nameof(VendingEventDispatcher) + ": no event assets found in Resources/VendingEvents.");
-            return;
-        }
-
-        HashSet<string> eventIds = new();
-        HashSet<string> productIds = new();
-        foreach (VendingEventSO evt in loaded)
-        {
-            if (evt == null || string.IsNullOrWhiteSpace(evt.eventId))
-                continue;
-
-            if (!eventIds.Add(evt.eventId))
-            {
-                Debug.LogError($"Duplicate vending event id '{evt.eventId}' on {evt.name}; asset skipped.", evt);
-                continue;
-            }
-
-            if (!string.IsNullOrWhiteSpace(evt.physicalProductId) && !productIds.Add(evt.physicalProductId))
-            {
-                Debug.LogError($"Duplicate physical product id '{evt.physicalProductId}' on {evt.name}; asset skipped.", evt);
-                continue;
-            }
-
-            events.Add(evt);
-        }
     }
 
 }

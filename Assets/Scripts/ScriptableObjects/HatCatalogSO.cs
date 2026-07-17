@@ -7,8 +7,6 @@ public class HatCatalogSO : ScriptableObject
     public class HatEntry
     {
         public Sprite sprite;
-        public Vector3 localOffset = Vector3.zero;
-        public Vector3 sittingLocalOffset = Vector3.zero;
         public Vector3 localScale = new(0.5f, 0.5f, 1f);
     }
 
@@ -17,6 +15,10 @@ public class HatCatalogSO : ScriptableObject
     {
         [Tooltip("Must match the Agent Type in an AgentProfileSO.")]
         public string agentType = "";
+        [Tooltip("Shared position of the bottom-center of every hat while this character is standing.")]
+        public Vector3 standingOffset = Vector3.zero;
+        [Tooltip("Shared position of the bottom-center of every hat while this character is sitting.")]
+        public Vector3 sittingOffset = Vector3.zero;
         public HatEntry[] hats = new HatEntry[0];
     }
 

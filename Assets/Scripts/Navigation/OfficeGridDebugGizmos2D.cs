@@ -12,7 +12,6 @@ public class OfficeGridDebugGizmos2D : MonoBehaviour
     public OfficeGrid2D grid;
     public bool drawCells = true;
     public bool drawClearanceCircles = false;
-    public bool selectedOnly = false;
 
     private void Reset()
     {
@@ -26,14 +25,6 @@ public class OfficeGridDebugGizmos2D : MonoBehaviour
     }
 
     private void OnDrawGizmos()
-    {
-        if (selectedOnly)
-            return;
-
-        Draw();
-    }
-
-    private void OnDrawGizmosSelected()
     {
         Draw();
     }

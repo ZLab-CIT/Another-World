@@ -9,7 +9,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c54ae0910535e5543bd021d5ce8d01fb, type: 3}
+  m_Script: {fileID: 11500000, guid: 1b62c88e4ac44271bd0d2b06f6feb021, type: 3}
   m_Name: Snacks
   m_EditorClassIdentifier: 
   eventId: vending_drop
@@ -72,16 +72,6 @@ MonoBehaviour:
   postFocusChange: 0
   postSocialChange: 0
   postProductivityChange: 0
-  rarity: 0
-  cosmeticType: 0
-  agentTint: {r: 1, g: 1, b: 1, a: 1}
-  furniturePrefab: {fileID: 0}
-  furnitureSprites: []
-  furnitureKind: 0
-  furnitureSocketId: 
-  confettiCount: 24
-  confettiDuration: 1.2
-  confettiSprite: {fileID: 0}
   announceDuration: 1.1
   interactionDirection: 0
   physicalProductId: vending_treat

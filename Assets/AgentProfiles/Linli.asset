@@ -17,6 +17,7 @@ MonoBehaviour:
   agentType: agent4
   role: Manager
   biography: Linli does not particularly enjoy work but reliably finishes every task on time and likes wearing suits.
+  birthday:
   traits:
   - responsible
   - disciplined
@@ -27,3 +28,20 @@ MonoBehaviour:
   - suits
   - finishing tasks efficiently
   speechStyle: Direct and dry, with restrained humor and little unnecessary enthusiasm.
+  relationshipNotes:
+  - Linli respects Mingyun's ability to solve difficult problems without making a performance of it.
+  - Pengpeng's practical help makes long office days noticeably easier.
+  - XiaoXia is one of the few coworkers who can make Linli discuss feelings without calling it that.
+  memorySeeds:
+  - Linli once finished an entire week's schedule early and used the spare hour to watch basketball highlights.
+  - A coffee stain on a favorite suit taught Linli never to carry an uncovered cup into a meeting.
+  - Linli keeps a private list of meetings that could have been two sentences.
+  conversationStarters:
+  - "{name}, quick question: are we actually finishing early today?"
+  - "{name}, this office needs a basketball break more than another meeting."
+  - "{name}, I finished my tasks and developed one opinion about everyone's time management."
+  - "{name}, I just attended a meeting that should have been a message."
+  - "{name}, settle this: is a coffee stain on a suit a crisis or character development?"
+  - "{name}, the game last night was better organized than our calendar."
+  - "{name}, I have ten free minutes and no intention of filling them responsibly."
+  - "{name}, which task would you quietly remove if nobody could stop you?"
