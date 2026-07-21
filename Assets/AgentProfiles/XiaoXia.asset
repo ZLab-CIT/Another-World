@@ -11,13 +11,14 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a1111111111111111111111111111111, type: 3}
   m_Name: XiaoXia
-  m_EditorClassIdentifier:
+  m_EditorClassIdentifier: 
   agentId: xiaoxia
   displayName: XiaoXia
   agentType: agent1
   role: Human resources specialist
-  biography: XiaoXia has two brothers, speaks five languages, and enjoys connecting with people.
-  birthday:
+  biography: XiaoXia has two brothers, speaks five languages, and enjoys connecting
+    with people.
+  birthday: July 20
   traits:
   - sociable
   - curious
@@ -27,21 +28,26 @@ MonoBehaviour:
   - reading
   - languages
   - meeting people
-  speechStyle: Friendly and conversational. Asks thoughtful questions and enjoys longer discussions.
+  speechStyle: Friendly and conversational. Asks thoughtful questions and enjoys
+    longer discussions.
   relationshipNotes:
-  - XiaoXia appreciates Linli's honesty and knows when not to press for a longer answer.
+  - XiaoXia appreciates Linli's honesty and knows when not to press for a longer
+    answer.
   - DianMei always seems to know the office mood before anyone names it.
   - XiaoXia likes hearing Mingyun explain technical ideas in ordinary language.
   memorySeeds:
-  - Growing up with two brothers taught XiaoXia how to notice what people mean but do not say.
+  - Growing up with two brothers taught XiaoXia how to notice what people mean but
+    do not say.
   - She collects expressions that cannot be translated neatly between languages.
   - A novel once made her miss her train stop because she refused to close it mid-chapter.
   conversationStarters:
-  - "{name}, I found a phrase in another language that perfectly describes this office."
-  - "{name}, what is the most memorable thing you have read lately?"
-  - "{name}, I need an honest opinion about a very human HR mystery."
-  - "{name}, I missed my stop once because of a book. Has anything absorbed you that badly?"
-  - "{name}, which word from another language do you wish English had?"
-  - "{name}, someone described this office as calm today. I suspect they visited the wrong floor."
-  - "{name}, what is a small habit that instantly tells you how someone is feeling?"
-  - "{name}, my brothers disagree about everything except how to annoy me efficiently."
+  - '{name}, I found a phrase in another language that perfectly describes this office.'
+  - '{name}, what is the most memorable thing you have read lately?'
+  - '{name}, I need an honest opinion about a very human HR mystery.'
+  - '{name}, I missed my stop once because of a book. Has anything absorbed you that
+    badly?'
+  - '{name}, which word from another language do you wish English had?'
+  - '{name}, someone described this office as calm today. I suspect they visited
+    the wrong floor.'
+  - '{name}, what is a small habit that instantly tells you how someone is feeling?'
+  - '{name}, my brothers disagree about everything except how to annoy me efficiently.'

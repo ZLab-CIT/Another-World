@@ -7,7 +7,16 @@ public enum OfficeActionType
     CoffeeMachine,
     BreakSpot,
     ChatSpot,
-    MeetingRoom
+    MeetingRoom,
+    PhoneCall,
+    Printer,
+    Whiteboard,
+    PlantCare,
+    WindowBreak,
+    WalkAround,
+    Think,
+    CheckPhone,
+    ApproachColleague
 }
 
 public enum OfficeFacingDirection
@@ -30,6 +39,8 @@ public class OfficeActionPoint : MonoBehaviour
     public OfficeActionType actionType;
 
     [Header("Action Settings")]
+    [Tooltip("Optional human-readable label used in LLM prompts and thought bubbles.")]
+    public string actionLabel;
     public float useTime = 3f;
     public float baseScore = 10f;
 
@@ -45,6 +56,9 @@ public class OfficeActionPoint : MonoBehaviour
     public float focusChange;
     public float socialChange;
     public float productivityChange;
+
+    public delegate void ActionUsedHandler();
+    public event ActionUsedHandler OnActionUsed;
 
     private readonly Dictionary<AIWorkerAgent, int> reservedSlots = new();
 
@@ -108,6 +122,7 @@ public class OfficeActionPoint : MonoBehaviour
     public void ApplyTo(AIWorkerAgent agent)
     {
         agent.ApplyEffects(energyChange, focusChange, socialChange, productivityChange);
+        OnActionUsed?.Invoke();
     }
 
     private int SlotCount => slots != null && slots.Count > 0 ? slots.Count : 1;

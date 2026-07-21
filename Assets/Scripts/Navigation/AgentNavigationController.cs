@@ -28,7 +28,14 @@ public class AgentNavigationController : MonoBehaviour
         if (action == null || owner.Grid == null)
             return false;
 
-        Vector2 targetPosition = action.GetTargetPosition(owner);
+        return Plan(action.GetTargetPosition(owner));
+    }
+
+    public bool Plan(Vector2 targetPosition)
+    {
+        if (owner.Grid == null)
+            return false;
+
         currentPath = OfficePathfinder2D.FindPath(
             owner.Grid,
             owner.GetPosition(),
@@ -41,7 +48,7 @@ public class AgentNavigationController : MonoBehaviour
         return true;
     }
 
-    public TickResult Tick()
+    public TickResult Tick(float speedMultiplier = 1f)
     {
         if (currentPath == null || currentPath.Count == 0)
             return TickResult.Failed;
@@ -55,7 +62,7 @@ public class AgentNavigationController : MonoBehaviour
             owner.Grid,
             target,
             owner.navigationRadius,
-            owner.speed * owner.EffectiveSpeedMultiplier,
+            owner.speed * owner.EffectiveSpeedMultiplier * Mathf.Max(0f, speedMultiplier),
             Time.deltaTime);
 
         if (!moved)

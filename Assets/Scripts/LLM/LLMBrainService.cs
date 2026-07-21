@@ -12,7 +12,6 @@ public sealed class ConversationPlan
     public string topic;
     public string openingLine;
 }
-
 public sealed class ConversationParticipantContext
 {
     public string agentId;
@@ -24,6 +23,25 @@ public sealed class ConversationTurn
 {
     public string speaker;
     public string line;
+}
+
+public sealed class OfficeActivityPlan
+{
+    public OfficeActionType actionType;
+    public OfficeDestinationMode destinationMode;
+    public string destinationHint;
+    public string targetAgent;
+    public float durationSeconds;
+    public string reason;
+    public string thought;
+}
+
+public enum OfficeDestinationMode
+{
+    ActionPoint,
+    FreePosition,
+    CurrentPosition,
+    FollowAgent
 }
 
 public class AgentProfile
@@ -50,11 +68,13 @@ public class LLMBrainService : MonoBehaviour
 {
     public static LLMBrainService Instance { get; private set; }
 
-    [Header("Backend (OpenAI-compatible; Ollama by default)")]
-    [SerializeField] private string baseUrl = "http://localhost:11434/v1";
+    [Header("Backend (OpenAI-compatible; GLM by default)")]
+    [SerializeField] private string baseUrl = "https://api.z.ai/api/paas/v4";
     [SerializeField] private string apiKey = "";
-    [Tooltip("Ollama model tag, e.g. qwen2.5:1.5b. For cloud, use the provider's model id.")]
-    [SerializeField] private string model = "qwen2.5:1.5b";
+    [Tooltip("Environment variable used when Api Key is empty. Checked before GLM_API_KEY, ZHIPUAI_API_KEY, and ZAI_API_KEY fallbacks.")]
+    [SerializeField] private string apiKeyEnvironmentVariable = "GLM_API_KEY";
+    [Tooltip("GLM model id. glm-4.7-flash is currently free on Z.AI and is useful for smoke testing quota/API access.")]
+    [SerializeField] private string model = "glm-4.7-flash";
 
     [Header("Generation")]
     [SerializeField] private float temperature = 0.8f;
@@ -73,15 +93,28 @@ public class LLMBrainService : MonoBehaviour
     [Tooltip("Maximum generation time for the complete three-reply conversation script.")]
     [SerializeField, Min(8)] private int conversationScriptTimeoutSeconds = 30;
 
+    [Header("Activity Planning")]
+    [Tooltip("If on, the model generates short queues of office activities. Unity still validates every target and path when each activity starts.")]
+    [SerializeField] private bool enableActivityPlans = true;
+    [SerializeField, Range(2, 6)] private int activityBatchSize = 4;
+    [Tooltip("Minimum time between activity-batch requests across every worker in the office.")]
+    [SerializeField, Min(5f)] private float globalActivityPlanIntervalSeconds = 30f;
+    [SerializeField, Min(10)] private int activityPlanTimeoutSeconds = 30;
+
     [Header("Agent Personalities")]
     [SerializeField] private AgentPersonalityEntry[] personalities;
 
     private ILLMBackend backend;
     private readonly Dictionary<string, AgentProfile> profiles = new();
     private readonly List<string> worldEvents = new();
+    private readonly List<string> recentGlobalTopics = new();
+    private readonly List<string> recentGlobalUtterances = new();
     private readonly HashSet<string> announcedBirthdays = new();
+    private readonly List<string> pendingActivityRequesters = new();
     private readonly SemaphoreSlim socialRequestGate = new(1, 1);
     private int pendingConversationScripts;
+    private bool loggedMissingApiKey;
+    private float nextGlobalActivityPlanTime;
 
     public static LLMBrainService Ensure()
     {
@@ -101,7 +134,16 @@ public class LLMBrainService : MonoBehaviour
         }
 
         Instance = this;
-        backend = new OpenAICompatibleBackend(baseUrl, apiKey, model);
+        string resolvedApiKey = ResolveApiKey();
+        if (RequiresApiKey() && string.IsNullOrWhiteSpace(resolvedApiKey))
+        {
+            LogMissingApiKey();
+            backend = null;
+        }
+        else
+        {
+            backend = new OpenAICompatibleBackend(baseUrl, resolvedApiKey, model);
+        }
 
         if (personalities != null)
         {
@@ -142,6 +184,89 @@ public class LLMBrainService : MonoBehaviour
 
     public bool EnableSocialReplies => enableSocialReplies;
     public bool EnableGeneratedConversationPlans => enableGeneratedConversationPlans;
+    public bool EnableActivityPlans => enableActivityPlans;
+    public int ActivityBatchSize => Mathf.Clamp(activityBatchSize, 2, 6);
+
+    public bool TryReserveActivityPlanRequest(string agentId)
+    {
+        if (!enableActivityPlans || backend == null || string.IsNullOrWhiteSpace(agentId))
+            return false;
+
+        string requester = agentId.Trim();
+        if (!pendingActivityRequesters.Contains(requester))
+            pendingActivityRequesters.Add(requester);
+
+        if (pendingActivityRequesters.Count == 0
+            || !string.Equals(pendingActivityRequesters[0], requester,
+                StringComparison.OrdinalIgnoreCase)
+            || pendingConversationScripts > 0
+            || socialRequestGate.CurrentCount == 0
+            || Time.unscaledTime < nextGlobalActivityPlanTime)
+            return false;
+
+        pendingActivityRequesters.RemoveAt(0);
+        nextGlobalActivityPlanTime = Time.unscaledTime
+            + Mathf.Max(5f, globalActivityPlanIntervalSeconds);
+        return true;
+    }
+
+    public void CancelActivityPlanRequest(string agentId)
+    {
+        if (string.IsNullOrWhiteSpace(agentId))
+            return;
+
+        pendingActivityRequesters.RemoveAll(value => string.Equals(
+            value, agentId.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string ResolveApiKey()
+    {
+        if (!string.IsNullOrWhiteSpace(apiKey))
+            return apiKey.Trim();
+
+        string[] candidates =
+        {
+            apiKeyEnvironmentVariable,
+            "GLM_API_KEY",
+            "ZHIPUAI_API_KEY",
+            "ZAI_API_KEY"
+        };
+
+        foreach (string candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+                continue;
+            string value = Environment.GetEnvironmentVariable(candidate.Trim());
+            if (!string.IsNullOrWhiteSpace(value))
+                return value.Trim();
+        }
+
+        return "";
+    }
+
+    private bool RequiresApiKey()
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl))
+            return false;
+
+        Uri uri;
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out uri))
+            return false;
+
+        return !string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void LogMissingApiKey()
+    {
+        if (loggedMissingApiKey)
+            return;
+
+        loggedMissingApiKey = true;
+        Debug.LogWarning(nameof(LLMBrainService) +
+            " GLM API key is empty. Set Api Key in the Inspector or launch Unity with GLM_API_KEY, ZHIPUAI_API_KEY, or ZAI_API_KEY set.",
+            this);
+    }
 
     public void Remember(string agentId, string line)
     {
@@ -157,6 +282,45 @@ public class LLMBrainService : MonoBehaviour
         worldEvents.Add(description.Trim());
         while (worldEvents.Count > 12)
             worldEvents.RemoveAt(0);
+    }
+
+    [ContextMenu("Debug/Log Memory Snapshot")]
+    private void LogMemorySnapshot()
+    {
+        StringBuilder snapshot = new();
+        snapshot.AppendLine("LLM memory snapshot");
+        snapshot.AppendLine("World events:");
+        if (worldEvents.Count == 0)
+            snapshot.AppendLine("- <none>");
+        else
+            foreach (string worldEvent in worldEvents)
+                snapshot.Append("- ").Append(worldEvent).AppendLine();
+
+        HashSet<AgentProfile> uniqueProfiles = new();
+        foreach (AgentProfile profile in profiles.Values)
+            if (profile != null)
+                uniqueProfiles.Add(profile);
+
+        snapshot.AppendLine("Profiles:");
+        foreach (AgentProfile profile in uniqueProfiles)
+        {
+            snapshot.Append("- ").Append(DisplayName(profile, profile.agentId)).Append(": ");
+            snapshot.Append("birthday=").Append(string.IsNullOrWhiteSpace(profile.birthday)
+                ? "<unset>" : profile.birthday.Trim());
+            snapshot.Append(", memories=").Append(profile.memory.Count).AppendLine();
+            int start = Mathf.Max(0, profile.memory.Count - Mathf.Max(1, memoryLines));
+            for (int i = start; i < profile.memory.Count; i++)
+                snapshot.Append("  - ").Append(profile.memory[i]).AppendLine();
+        }
+
+        Debug.Log(snapshot.ToString(), this);
+    }
+
+    [ContextMenu("Debug/Add Test Serious Event")]
+    private void AddTestSeriousEvent()
+    {
+        RememberWorldEvent("A serious production incident happened today, and the office is treating it carefully.");
+        LogMemorySnapshot();
     }
 
     private void RememberBirthdayIfToday(AgentProfile profile)
@@ -243,19 +407,16 @@ public class LLMBrainService : MonoBehaviour
 
             LLMOptions options = new()
             {
+                requestLabel = "ConversationPlan",
                 temperature = Mathf.Clamp(temperature, 0.65f, 0.85f),
                 maxTokens = 120,
                 jsonMode = true,
                 structuredSchema = LLMJsonSchema.ConversationPlan,
-                timeoutSeconds = Mathf.Min(requestTimeoutSeconds, conversationPlanTimeoutSeconds)
+                timeoutSeconds = Mathf.Min(requestTimeoutSeconds, conversationPlanTimeoutSeconds),
+                maxRetries = 1,
+                retryBaseDelaySeconds = 1.5f
             };
-
-            System.Diagnostics.Stopwatch timer = System.Diagnostics.Stopwatch.StartNew();
             string raw = await backend.CompleteAsync(messages, options);
-            timer.Stop();
-            Debug.Log("[Conversation plan raw · " + timer.Elapsed.TotalSeconds.ToString("0.0") +
-                "s] " + who + ": " +
-                (string.IsNullOrWhiteSpace(raw) ? "<empty>" : raw), this);
             ConversationPlan plan = ParseConversationPlan(raw);
             string rejection = ValidateConversationPlan(plan, profile, coworkers, who,
                 candidateNames, out ConversationPlan validated);
@@ -271,6 +432,92 @@ public class LLMBrainService : MonoBehaviour
         catch (Exception exception)
         {
             Debug.LogWarning(nameof(LLMBrainService) + " conversation planning failed for " +
+                agentId + ": " + exception.Message, this);
+            return null;
+        }
+        finally
+        {
+            socialRequestGate.Release();
+        }
+    }
+
+    public async Task<List<OfficeActivityPlan>> PlanActivityBatchAsync(
+        string agentId,
+        List<OfficeActionType> availableActions,
+        List<ConversationParticipantContext> coworkers,
+        string currentState,
+        int requestedCount)
+    {
+        AgentProfile profile = GetProfile(agentId);
+        if (backend == null || profile == null || availableActions == null || availableActions.Count == 0)
+            return null;
+
+        requestedCount = Mathf.Clamp(requestedCount, 2, 6);
+
+        if (socialRequestGate.CurrentCount == 0 || pendingConversationScripts > 0)
+            return null;
+
+        await socialRequestGate.WaitAsync();
+        try
+        {
+            string who = DisplayName(profile, agentId);
+            string allowed = JoinActionTypes(availableActions);
+            string coworkerNames = JoinParticipantNames(coworkers);
+            StringBuilder context = new();
+            if (!string.IsNullOrWhiteSpace(currentState))
+                context.Append("Current state: ").Append(currentState.Trim()).AppendLine();
+            AppendRecentMemory(context, profile, Mathf.Max(2, memoryLines));
+            AppendWorldEvents(context, 3);
+
+            List<ChatMessage> messages = new()
+            {
+                new ChatMessage("system",
+                    "Plan the next " + requestedCount + " believable physical office activities for a simulation worker. You are " + who + ". " +
+                    profile.personality + " Create a short, varied sequence that fits their needs, personality, and recent context. " +
+                    "Do not repeat the same action consecutively or fill the sequence with desk work. " +
+                    "ActionPoint means an exact object such as a desk, printer, or coffee machine. " +
+                    "FreePosition means a reachable place in the office. CurrentPosition means no travel. " +
+                    "FollowAgent means approach the named coworker's live position; use it only for ApproachColleague. " +
+                    "Do not invent unavailable actions. Respond only as JSON with exactly one activities array: " +
+                    "{\"activities\":[{\"actionType\":string,\"destinationMode\":string,\"destinationHint\":string," +
+                    "\"targetAgent\":string,\"durationSeconds\":number,\"reason\":string,\"thought\":string}" +
+                    "]}. Return exactly " + requestedCount + " activity objects. " +
+                    "actionType must be exactly one of: " + allowed + ". " +
+                    "destinationMode must be ActionPoint, FreePosition, CurrentPosition, or FollowAgent. " +
+                    "For a free destination, destinationHint can be General, Quiet, Lounge, WorkArea, or Corridor. " +
+                    (string.IsNullOrWhiteSpace(coworkerNames)
+                        ? "No coworkers are currently available, so do not choose ApproachColleague. "
+                        : "For ApproachColleague, targetAgent must be exactly one of: " + coworkerNames + ". ") +
+                    "durationSeconds must be between 2 and 30. " +
+                    "reason is 3 to 14 words. thought is an optional short in-character thought, 0 to 12 words."),
+                new ChatMessage("user", context.ToString())
+            };
+
+            LLMOptions options = new()
+            {
+                requestLabel = "ActivityBatch:" + who,
+                temperature = Mathf.Clamp(temperature, 0.55f, 0.8f),
+                maxTokens = Mathf.Clamp(requestedCount * 110, 220, 600),
+                jsonMode = true,
+                structuredSchema = LLMJsonSchema.ActivityPlan,
+                timeoutSeconds = Mathf.Min(requestTimeoutSeconds,
+                    Mathf.Max(8, activityPlanTimeoutSeconds)),
+                maxRetries = 0
+            };
+            string raw = await backend.CompleteAsync(messages, options);
+            List<OfficeActivityPlan> plans = ParseActivityPlans(
+                raw, availableActions, coworkers, requestedCount);
+            if ((plans == null || plans.Count == 0) && !string.IsNullOrWhiteSpace(raw))
+                Debug.LogWarning("[Activity batch rejected] " + who +
+                    ": no valid available activities", this);
+            else if (plans != null && plans.Count > 0)
+                Debug.Log("[Activity batch] " + who + ": accepted " + plans.Count +
+                    " queued activities", this);
+            return plans;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning(nameof(LLMBrainService) + " activity planning failed for " +
                 agentId + ": " + exception.Message, this);
             return null;
         }
@@ -317,6 +564,10 @@ public class LLMBrainService : MonoBehaviour
                 }
             }
             AppendWorldEvents(cast, 2);
+            AppendRecentList(cast, "Recent lines heard anywhere in the office; do not reuse or lightly paraphrase:",
+                recentGlobalUtterances, 8);
+            AppendRecentList(cast, "Recent office conversation subjects; choose a different angle:",
+                recentGlobalTopics, 6);
 
             StringBuilder order = new();
             for (int i = 0; i < speakerOrder.Count; i++)
@@ -324,17 +575,21 @@ public class LLMBrainService : MonoBehaviour
                 order.Append("reply").Append(i + 1).Append(" is spoken by ")
                     .Append(speakerOrder[i]).AppendLine(".");
             }
+            string replyKeys = BuildReplyKeyList(speakerOrder.Count);
 
             List<ChatMessage> messages = new()
             {
                 new ChatMessage("system",
                     "Continue one natural face-to-face workplace conversation. Each reply value is spoken by the assigned " +
                     "character. Each line must directly react to what came before, remain on the established subject, and " +
-                    "sound distinctively like that character. Use casual spoken language and contractions. Let people answer, " +
+                    "sound distinctively like that character. Use at least one specific profile detail, interest, relationship, " +
+                    "memory, job detail, or speech-style cue across the replies; avoid reusable workplace filler. " +
+                    "Use casual spoken language and contractions. Let people answer, " +
                     "add a concrete detail, tease, hesitate, or disagree when appropriate; they must not merely praise or agree. " +
-                    "Use 4 to 20 words per line. Do not invent shared history, switch roles, narrate actions, use speaker labels " +
+                    "Every reply value must be non-empty and use 4 to 20 words. Do not invent shared history, switch roles, narrate actions, use speaker labels " +
                     "inside a line, mention AI, or repeat wording. Do not end every line with a question. " +
-                    "Return only JSON with exactly the keys reply1, reply2, and reply3."),
+                    "If the opening already congratulated someone, do not repeat the exact phrase happy birthday; add a personal wish, thanks, joke, or gift reaction instead. " +
+                    "Return only JSON with exactly these keys: " + replyKeys + "."),
                 new ChatMessage("user",
                     cast + "Conversation fact: " + openingSpeaker + " initiated this subject and said the opening line. " +
                     "Do not transfer " + openingSpeaker + "'s actions or memories to somebody else.\n" +
@@ -344,21 +599,14 @@ public class LLMBrainService : MonoBehaviour
 
             LLMOptions options = new()
             {
+                requestLabel = "ConversationScript",
                 temperature = Mathf.Clamp(temperature, 0.65f, 0.82f),
-                // Three short replies plus the JSON keys fit comfortably here.
-                // The smaller output budget materially lowers CPU generation time.
-                maxTokens = 144,
+                maxTokens = Mathf.Clamp(48 * speakerOrder.Count, 144, 320),
                 jsonMode = true,
                 structuredSchema = LLMJsonSchema.ConversationScript,
                 timeoutSeconds = Mathf.Min(requestTimeoutSeconds, conversationScriptTimeoutSeconds)
             };
-
-            System.Diagnostics.Stopwatch timer = System.Diagnostics.Stopwatch.StartNew();
             string raw = await backend.CompleteAsync(messages, options);
-            timer.Stop();
-            Debug.Log("[Conversation script raw · " + timer.Elapsed.TotalSeconds.ToString("0.0") +
-                "s] " + names + ": " +
-                (string.IsNullOrWhiteSpace(raw) ? "<empty>" : raw), this);
             List<ConversationTurn> turns = ParseAndValidateConversationScript(raw, participants,
                 speakerOrder, openingLine, names, out string rejection);
             if (turns == null && !string.IsNullOrWhiteSpace(raw))
@@ -403,6 +651,9 @@ public class LLMBrainService : MonoBehaviour
             }
         }
 
+        AddRecent(recentGlobalTopics, topic, 12);
+        AddRecent(recentGlobalUtterances, openingLine, 24);
+
         if (turns == null)
             return;
         foreach (ConversationTurn turn in turns)
@@ -411,6 +662,7 @@ public class LLMBrainService : MonoBehaviour
             AgentProfile profile = participant != null ? GetProfile(participant.agentId) : null;
             if (profile != null)
                 AddRecent(profile.recentUtterances, turn.line, 10);
+            AddRecent(recentGlobalUtterances, turn.line, 24);
         }
     }
 
@@ -468,6 +720,88 @@ public class LLMBrainService : MonoBehaviour
             result.Append(participant.displayName.Trim());
         }
         return result.ToString();
+    }
+
+    private static string JoinActionTypes(List<OfficeActionType> actions)
+    {
+        StringBuilder result = new();
+        foreach (OfficeActionType action in actions)
+        {
+            if (result.Length > 0)
+                result.Append(", ");
+            result.Append(action);
+        }
+        return result.ToString();
+    }
+
+    private List<OfficeActivityPlan> ParseActivityPlans(
+        string raw,
+        List<OfficeActionType> availableActions,
+        List<ConversationParticipantContext> coworkers,
+        int maxPlans)
+    {
+        if (CountOccurrences(raw, "\"activities\"") != 1)
+            return null;
+        string json = ExtractJson(raw);
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+        try
+        {
+            ActivityPlanBatchDTO batch = JsonUtility.FromJson<ActivityPlanBatchDTO>(json);
+            if (batch == null || batch.activities == null || batch.activities.Length == 0)
+                return null;
+
+            List<OfficeActivityPlan> result = new();
+            OfficeActionType? previousType = null;
+            int count = Mathf.Min(Mathf.Max(1, maxPlans), batch.activities.Length);
+            for (int i = 0; i < count; i++)
+            {
+                OfficeActivityPlan plan = ParseActivityPlanItem(
+                    batch.activities[i], availableActions, coworkers);
+                if (plan == null || previousType == plan.actionType)
+                    continue;
+
+                result.Add(plan);
+                previousType = plan.actionType;
+            }
+            return result.Count > 0 ? result : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private OfficeActivityPlan ParseActivityPlanItem(
+        ActivityPlanDTO dto,
+        List<OfficeActionType> availableActions,
+        List<ConversationParticipantContext> coworkers)
+    {
+        if (dto == null || string.IsNullOrWhiteSpace(dto.actionType)
+            || !Enum.TryParse(dto.actionType.Trim(), true, out OfficeActionType actionType)
+            || availableActions == null || !availableActions.Contains(actionType))
+            return null;
+        if (string.IsNullOrWhiteSpace(dto.destinationMode)
+            || !Enum.TryParse(dto.destinationMode.Trim(), true,
+                out OfficeDestinationMode destinationMode))
+            return null;
+
+        string targetAgent = CleanShortText(dto.targetAgent, 6);
+        bool requiresCoworker = destinationMode == OfficeDestinationMode.FollowAgent
+            || actionType == OfficeActionType.ApproachColleague;
+        if (requiresCoworker && FindParticipant(coworkers, targetAgent) == null)
+            return null;
+
+        return new OfficeActivityPlan
+        {
+            actionType = actionType,
+            destinationMode = destinationMode,
+            destinationHint = CleanShortText(dto.destinationHint, 3),
+            targetAgent = targetAgent,
+            durationSeconds = Mathf.Clamp(dto.durationSeconds <= 0f ? 5f : dto.durationSeconds, 2f, 30f),
+            reason = CleanShortText(dto.reason, 14),
+            thought = CleanShortText(dto.thought, 12)
+        };
     }
 
     private ConversationPlan ParseConversationPlan(string raw)
@@ -572,7 +906,15 @@ public class LLMBrainService : MonoBehaviour
 
         List<ConversationTurn> accepted = new();
         List<string> lines = new() { openingLine };
-        string[] generatedLines = { script.reply1, script.reply2, script.reply3 };
+        string[] generatedLines =
+        {
+            script.reply1,
+            script.reply2,
+            script.reply3,
+            script.reply4,
+            script.reply5,
+            script.reply6
+        };
         int count = Mathf.Min(generatedLines.Length, speakerOrder.Count);
         for (int i = 0; i < count; i++)
         {
@@ -592,6 +934,11 @@ public class LLMBrainService : MonoBehaviour
                 rejection = "turn " + (i + 1) + " repeated a recent line";
                 return accepted.Count > 0 ? accepted : null;
             }
+            if (IsSimilarToAny(line, recentGlobalUtterances, 0.82f))
+            {
+                rejection = "turn " + (i + 1) + " repeated a line recently heard elsewhere";
+                return accepted.Count > 0 ? accepted : null;
+            }
 
             accepted.Add(new ConversationTurn { speaker = expectedSpeaker, line = line });
             lines.Add(line);
@@ -605,6 +952,18 @@ public class LLMBrainService : MonoBehaviour
         return accepted;
     }
 
+    private static string BuildReplyKeyList(int count)
+    {
+        StringBuilder result = new();
+        for (int i = 0; i < count; i++)
+        {
+            if (result.Length > 0)
+                result.Append(", ");
+            result.Append("reply").Append(i + 1);
+        }
+        return result.ToString();
+    }
+
     private static string CleanTopic(string topic)
     {
         if (string.IsNullOrWhiteSpace(topic))
@@ -613,6 +972,28 @@ public class LLMBrainService : MonoBehaviour
             .Trim('"', '\'', '.', '!', '?', ':', ';');
         int words = CountWords(value);
         return words >= 2 && words <= 18 ? value : null;
+    }
+
+    private static string CleanShortText(string value, int maxWords)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+        string clean = value.Replace('\r', ' ').Replace('\n', ' ').Trim()
+            .Trim('"', '\'', '.', '!', '?', ':', ';');
+        string[] words = clean.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0)
+            return "";
+        if (words.Length <= maxWords)
+            return clean;
+
+        StringBuilder result = new();
+        for (int i = 0; i < maxWords; i++)
+        {
+            if (result.Length > 0)
+                result.Append(' ');
+            result.Append(words[i]);
+        }
+        return result.ToString();
     }
 
     private static bool IsGenericTopic(string topic)
@@ -1133,7 +1514,15 @@ public class LLMBrainService : MonoBehaviour
     [ContextMenu("Test Connection")]
     private async void TestConnection()
     {
-        backend ??= new OpenAICompatibleBackend(baseUrl, apiKey, model);
+        string resolvedApiKey = ResolveApiKey();
+        if (RequiresApiKey() && string.IsNullOrWhiteSpace(resolvedApiKey))
+        {
+            LogMissingApiKey();
+            Debug.Log(nameof(LLMBrainService) + " test response: (not sent - missing GLM API key)", this);
+            return;
+        }
+
+        backend = new OpenAICompatibleBackend(baseUrl, resolvedApiKey, model);
 
         List<ChatMessage> messages = new()
         {
@@ -1141,10 +1530,17 @@ public class LLMBrainService : MonoBehaviour
             new ChatMessage("user", "Say hello in one short sentence.")
         };
 
-        LLMOptions opts = new() { temperature = 0.5f, maxTokens = 64, jsonMode = true };
+        LLMOptions opts = new()
+        {
+            requestLabel = "BackendTest",
+            temperature = 0.5f,
+            maxTokens = 64,
+            jsonMode = true
+        };
         string result = await backend.CompleteAsync(messages, opts);
 
-        Debug.Log(nameof(LLMBrainService) + " test response: " + (result ?? "(null/failed - is Ollama running?)"));
+        Debug.Log(nameof(LLMBrainService) + " test response: " +
+            (result ?? "(null/failed - check GLM API key, quota, base URL, and model access)"));
     }
 
     [Serializable]
@@ -1161,5 +1557,26 @@ public class LLMBrainService : MonoBehaviour
         public string reply1;
         public string reply2;
         public string reply3;
+        public string reply4;
+        public string reply5;
+        public string reply6;
+    }
+
+    [Serializable]
+    private class ActivityPlanBatchDTO
+    {
+        public ActivityPlanDTO[] activities;
+    }
+
+    [Serializable]
+    private class ActivityPlanDTO
+    {
+        public string actionType;
+        public string destinationMode;
+        public string destinationHint;
+        public string targetAgent;
+        public float durationSeconds;
+        public string reason;
+        public string thought;
     }
 }

@@ -21,11 +21,14 @@ public class ChatMessage
 
 public class LLMOptions
 {
+    public string requestLabel = "Request";
     public float temperature = 0.8f;
     public int maxTokens = 256;
     public bool jsonMode = false;
     public LLMJsonSchema structuredSchema = LLMJsonSchema.None;
     public int timeoutSeconds = 30;
+    public int maxRetries = 2;
+    public float retryBaseDelaySeconds = 2f;
     public CancellationToken cancellationToken = CancellationToken.None;
 }
 
@@ -33,7 +36,8 @@ public enum LLMJsonSchema
 {
     None,
     ConversationPlan,
-    ConversationScript
+    ConversationScript,
+    ActivityPlan
 }
 
 public interface ILLMBackend
@@ -48,6 +52,7 @@ public class OpenAICompatibleBackend : ILLMBackend
     private readonly string baseUrl;
     private readonly string apiKey;
     private readonly string model;
+    private DateTime cooldownUntilUtc = DateTime.MinValue;
 
     public bool IsAvailable => true;
 
@@ -61,50 +66,154 @@ public class OpenAICompatibleBackend : ILLMBackend
     public async Task<string> CompleteAsync(List<ChatMessage> messages, LLMOptions options = null)
     {
         options ??= new LLMOptions();
+        string logPrefix = "[LLM " + (string.IsNullOrWhiteSpace(options.requestLabel)
+            ? "Request" : options.requestLabel.Trim()) + "] ";
         if (options.cancellationToken.IsCancellationRequested)
+            return null;
+        if (DateTime.UtcNow < cooldownUntilUtc)
             return null;
 
         RequestPayload payload = new()
         {
             model = model,
             messages = messages,
-            temperature = options.temperature,
+            temperature = Mathf.Round(options.temperature * 100f) / 100f,
             max_tokens = options.maxTokens,
             stream = false
         };
 
         string json = JsonUtility.ToJson(payload);
+        List<string> extraPayloadFields = new();
         if (options.jsonMode)
-        {
-            string responseFormat = BuildResponseFormat(options.structuredSchema);
-            json = json.Substring(0, json.Length - 1) +
-                ",\"response_format\":" + responseFormat + "}";
-        }
+            extraPayloadFields.Add("\"response_format\":" + BuildResponseFormat(options.structuredSchema));
+        if (IsGlmModel())
+            extraPayloadFields.Add("\"thinking\":{\"type\":\"disabled\"}");
 
-        using (UnityWebRequest req = new(baseUrl + "/chat/completions", "POST"))
-        {
-            req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
-            req.downloadHandler = new DownloadHandlerBuffer();
-            req.SetRequestHeader("Content-Type", "application/json");
-            if (!string.IsNullOrEmpty(apiKey))
-                req.SetRequestHeader("Authorization", "Bearer " + apiKey);
-            req.timeout = (options != null && options.timeoutSeconds > 0) ? options.timeoutSeconds : 30;
+        if (extraPayloadFields.Count > 0)
+            json = json.Substring(0, json.Length - 1) + "," +
+                string.Join(",", extraPayloadFields) + "}";
 
-            UnityWebRequest.Result result = await WebRequestTask(req, options.cancellationToken);
+        int maxAttempts = Mathf.Max(1, options.maxRetries + 1);
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            long responseCode;
+            string responseBody;
+            string requestError;
+            string retryAfter;
+            UnityWebRequest.Result result;
+
+            using (UnityWebRequest req = new(baseUrl + "/chat/completions", "POST"))
+            {
+                req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
+                req.downloadHandler = new DownloadHandlerBuffer();
+                req.SetRequestHeader("Content-Type", "application/json");
+                if (!string.IsNullOrEmpty(apiKey))
+                    req.SetRequestHeader("Authorization", "Bearer " + apiKey);
+                req.timeout = options.timeoutSeconds > 0 ? options.timeoutSeconds : 30;
+
+                result = await WebRequestTask(req, options.cancellationToken);
+                responseCode = req.responseCode;
+                responseBody = req.downloadHandler != null ? req.downloadHandler.text : "";
+                requestError = req.error;
+                retryAfter = req.GetResponseHeader("Retry-After");
+            }
 
             if (result != UnityWebRequest.Result.Success)
             {
                 if (options.cancellationToken.IsCancellationRequested)
                     return null;
-                Debug.LogWarning(nameof(OpenAICompatibleBackend) + " request failed: " + req.error);
+
+                bool timedOut = IsRequestTimeout(responseCode, requestError);
+                bool retryable = !timedOut && IsRetryable(responseCode, result);
+                if (retryable && attempt + 1 < maxAttempts)
+                {
+                    float delaySeconds = GetRetryDelaySeconds(
+                        retryAfter, options.retryBaseDelaySeconds, attempt);
+                    cooldownUntilUtc = DateTime.UtcNow.AddSeconds(delaySeconds);
+                    if (!await DelayAsync(delaySeconds, options.cancellationToken))
+                        return null;
+                    continue;
+                }
+
+                if (responseCode == 429)
+                {
+                    float cooldownSeconds = Mathf.Max(12f,
+                        GetRetryDelaySeconds(retryAfter, options.retryBaseDelaySeconds, attempt));
+                    cooldownUntilUtc = DateTime.UtcNow.AddSeconds(cooldownSeconds);
+                }
+                else if (timedOut)
+                    cooldownUntilUtc = DateTime.UtcNow.AddSeconds(30f);
+
+                Debug.LogWarning(logPrefix + nameof(OpenAICompatibleBackend) + " request failed (" +
+                    responseCode + "): " + requestError +
+                    (responseCode == 429 || timedOut
+                        ? " Requests will temporarily use local fallback." : "") +
+                    (string.IsNullOrWhiteSpace(responseBody) ? "" : "\n" + responseBody));
                 return null;
             }
 
-            ChatCompletionResponse resp = JsonUtility.FromJson<ChatCompletionResponse>(req.downloadHandler.text);
+            cooldownUntilUtc = DateTime.MinValue;
+            ChatCompletionResponse resp = JsonUtility.FromJson<ChatCompletionResponse>(responseBody);
             if (resp == null || resp.choices == null || resp.choices.Length == 0)
+            {
+                Debug.LogWarning(logPrefix + nameof(OpenAICompatibleBackend) +
+                    " returned an unreadable response: " + responseBody);
                 return null;
+            }
 
-            return resp.choices[0].message.content;
+            string content = resp.choices[0].message != null ? resp.choices[0].message.content : null;
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                Debug.LogWarning(logPrefix + nameof(OpenAICompatibleBackend) +
+                    " returned empty message content: " + responseBody);
+                return null;
+            }
+
+            if (resp.usage != null && resp.usage.total_tokens > 0)
+            {
+                Debug.Log(logPrefix + nameof(OpenAICompatibleBackend) + " token usage: prompt=" +
+                    resp.usage.prompt_tokens + ", completion=" + resp.usage.completion_tokens +
+                    ", total=" + resp.usage.total_tokens);
+            }
+
+            return content;
+        }
+
+        return null;
+    }
+
+    private static bool IsRetryable(long responseCode, UnityWebRequest.Result result)
+    {
+        return responseCode == 408 || responseCode == 429 || responseCode >= 500
+            || (responseCode <= 0 && result == UnityWebRequest.Result.ConnectionError);
+    }
+
+    private static bool IsRequestTimeout(long responseCode, string requestError)
+    {
+        return responseCode <= 0 && !string.IsNullOrWhiteSpace(requestError)
+            && requestError.IndexOf("timeout", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static float GetRetryDelaySeconds(string retryAfter, float baseDelaySeconds, int attempt)
+    {
+        if (int.TryParse(retryAfter, out int retryAfterSeconds) && retryAfterSeconds > 0)
+            return Mathf.Clamp(retryAfterSeconds, 1, 60);
+
+        float exponential = Mathf.Max(0.5f, baseDelaySeconds) * Mathf.Pow(2f, attempt);
+        float jitter = (DateTime.UtcNow.Ticks % 500L) / 1000f;
+        return Mathf.Min(30f, exponential + jitter);
+    }
+
+    private static async Task<bool> DelayAsync(float seconds, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(Mathf.CeilToInt(seconds * 1000f), cancellationToken);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
         }
     }
 
@@ -118,26 +227,17 @@ public class OpenAICompatibleBackend : ILLMBackend
         switch (schema)
         {
             case LLMJsonSchema.ConversationPlan:
-                return "{\"type\":\"json_schema\",\"json_schema\":{" +
-                    "\"name\":\"conversation_plan\",\"strict\":true,\"schema\":{" +
-                    "\"type\":\"object\",\"properties\":{" +
-                    "\"targetAgent\":{\"type\":\"string\"}," +
-                    "\"topic\":{\"type\":\"string\"}," +
-                    "\"openingLine\":{\"type\":\"string\"}}," +
-                    "\"required\":[\"targetAgent\",\"topic\",\"openingLine\"]," +
-                    "\"additionalProperties\":false}}}";
             case LLMJsonSchema.ConversationScript:
-                return "{\"type\":\"json_schema\",\"json_schema\":{" +
-                    "\"name\":\"conversation_script\",\"strict\":true,\"schema\":{" +
-                    "\"type\":\"object\",\"properties\":{" +
-                    "\"reply1\":{\"type\":\"string\"}," +
-                    "\"reply2\":{\"type\":\"string\"}," +
-                    "\"reply3\":{\"type\":\"string\"}}," +
-                    "\"required\":[\"reply1\",\"reply2\",\"reply3\"]," +
-                    "\"additionalProperties\":false}}}";
             default:
                 return "{\"type\":\"json_object\"}";
         }
+    }
+
+    private bool IsGlmModel()
+    {
+        return model.StartsWith("glm-", StringComparison.OrdinalIgnoreCase)
+            || baseUrl.IndexOf("z.ai", StringComparison.OrdinalIgnoreCase) >= 0
+            || baseUrl.IndexOf("bigmodel", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static async Task<UnityWebRequest.Result> WaitForWebRequest(
@@ -175,6 +275,7 @@ public class OpenAICompatibleBackend : ILLMBackend
     private class ChatCompletionResponse
     {
         public Choice[] choices;
+        public Usage usage;
     }
 
     [Serializable]
@@ -188,5 +289,13 @@ public class OpenAICompatibleBackend : ILLMBackend
     {
         public string role;
         public string content;
+    }
+
+    [Serializable]
+    private class Usage
+    {
+        public int prompt_tokens;
+        public int completion_tokens;
+        public int total_tokens;
     }
 }

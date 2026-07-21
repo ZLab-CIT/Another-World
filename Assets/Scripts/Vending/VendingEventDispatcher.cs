@@ -101,6 +101,17 @@ public class VendingEventDispatcher : MonoBehaviour
         announcer.Show(title, subtitle, null, 2f);
     }
 
+    public void ShowWorldAnnouncement(string title, string subtitle, Sprite icon = null,
+        float holdSeconds = 3f)
+    {
+        if (announcer == null)
+            announcer = FindFirstObjectByType<VendingEventAnnouncer>();
+        if (announcer == null)
+            return;
+
+        announcer.Show(title, subtitle, icon, holdSeconds);
+    }
+
     private IEnumerator RunEvent(VendingEventSO evt)
     {
         LLMBrainService.Instance?.RememberWorldEvent(evt.displayName + ": " + evt.description);

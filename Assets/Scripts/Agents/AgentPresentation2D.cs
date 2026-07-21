@@ -10,6 +10,7 @@ public class AgentPresentation2D : MonoBehaviour
     [Tooltip("Base of the character group order. Child SpriteRenderer order changes made by animations are preserved inside the group.")]
     [SerializeField] private int characterGroupBaseOrder = 10000;
     [SerializeField, Min(1f)] private float sortingUnitsPerWorldUnit = 100f;
+    [SerializeField] private Transform handAnchor;
 
     [Header("Thought Bubble")]
     [SerializeField] private bool thoughtBubblesEnabled = true;
@@ -21,9 +22,12 @@ public class AgentPresentation2D : MonoBehaviour
     private Vector3 currentHatStandingOffset;
     private Vector3 currentHatSittingOffset;
     private bool lastHatSittingState;
+    private GameObject heldItem;
+    private float heldItemExpiry;
     private SortingGroup sortingGroup;
 
     public bool ThoughtBubblesEnabled => thoughtBubblesEnabled;
+    public bool IsHolding => heldItem != null;
 
     public void SetFacing(Vector2 direction)
     {
@@ -38,6 +42,12 @@ public class AgentPresentation2D : MonoBehaviour
     private void Awake()
     {
         InitializeVisuals();
+    }
+
+    private void Update()
+    {
+        if (heldItem != null && heldItemExpiry > 0f && Time.time >= heldItemExpiry)
+            ClearHeldItem();
     }
 
     private void OnEnable()
@@ -62,6 +72,14 @@ public class AgentPresentation2D : MonoBehaviour
             sortingGroup = gameObject.AddComponent<SortingGroup>();
 
         sortingGroup.sortingLayerName = "Default";
+
+        if (handAnchor == null)
+        {
+            Transform visualRoot = animator != null ? animator.transform : transform;
+            handAnchor = new GameObject("HandAnchor").transform;
+            handAnchor.SetParent(visualRoot, false);
+            handAnchor.localPosition = new Vector3(0.3f, -0.15f, 0f);
+        }
     }
 
     public void UpdateState(Vector2 velocity, bool isSitting)
@@ -131,6 +149,63 @@ public class AgentPresentation2D : MonoBehaviour
         AgentThoughtBubble dialogueBubble = Instantiate(thoughtBubblePrefab, anchor);
         dialogueBubble.name = anchor.name + " Dialogue";
         return dialogueBubble;
+    }
+
+    public void AttachItemToHand(SceneItem item, Vector3 localOffset = default, Vector3 localScale = default, Quaternion localRot = default, float holdDuration = 0f)
+    {
+        ClearHeldItem();
+        if (item == null) return;
+
+        heldItem = item.gameObject;
+        heldItem.transform.SetParent(handAnchor, false);
+        heldItem.transform.localPosition = localOffset;
+        heldItem.transform.localScale = localScale == default ? Vector3.one : localScale;
+        heldItem.transform.localRotation = localRot;
+        heldItemExpiry = holdDuration > 0f ? Time.time + holdDuration : 0f;
+
+        if (item.TryGetComponent<SpriteRenderer>(out var sr)) ApplyHeldItemSorting(sr);
+    }
+
+    public void PlaceHeldItemAt(Transform parent, Vector3 localPosition)
+    {
+        if (heldItem == null)
+            return;
+
+        heldItem.transform.SetParent(parent, false);
+        heldItem.transform.localPosition = localPosition;
+        heldItem.transform.localScale = Vector3.one;
+        heldItem.transform.localRotation = Quaternion.identity;
+
+        if (heldItem.TryGetComponent<SpriteRenderer>(out var sr))
+        {
+            sr.sortingOrder = 15;
+        }
+
+        heldItem = null;
+        heldItemExpiry = 0f;
+    }
+
+    public void ClearHeldItem()
+    {
+        if (heldItem != null)
+        {
+            Destroy(heldItem);
+            heldItem = null;
+        }
+    }
+
+    private void ApplyHeldItemSorting(SpriteRenderer sr)
+    {
+        SpriteRenderer bodyRenderer = VisualRoot.GetComponentInChildren<SpriteRenderer>();
+        if (bodyRenderer != null)
+        {
+            sr.sortingLayerID = bodyRenderer.sortingLayerID;
+            sr.sortingOrder = bodyRenderer.sortingOrder + 10;
+        }
+        else
+        {
+            sr.sortingOrder = 50;
+        }
     }
 
     public void ApplyHat(Sprite hatSprite, Vector3 standingOffset, Vector3 sittingOffset, Vector3 localScale)

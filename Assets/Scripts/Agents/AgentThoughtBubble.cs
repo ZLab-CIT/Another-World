@@ -13,6 +13,7 @@ public class AgentThoughtBubble : MonoBehaviour
     [SerializeField, Min(1f)] private float maximumTextWidth = 330f;
     [SerializeField, Min(0f)] private float horizontalPadding = 30f;
     [SerializeField, Min(0f)] private float verticalPadding = 34f;
+    [SerializeField, Min(0f)] private float screenEdgePadding = 18f;
 
     [Header("Rendering")]
     [Tooltip("Kept above the character SortingGroups, whose base order is 10000.")]
@@ -27,12 +28,19 @@ public class AgentThoughtBubble : MonoBehaviour
     private RectTransform backgroundRect;
     private RectTransform messageRect;
     private Canvas bubbleCanvas;
+    private readonly Vector3[] worldCorners = new Vector3[4];
 
     private void Awake()
     {
         InitializeLayout();
         if (canvasGroup != null)
             canvasGroup.alpha = 0f;
+    }
+
+    private void LateUpdate()
+    {
+        if (canvasGroup != null && canvasGroup.alpha > 0f)
+            ClampToScreen();
     }
 
     public void Show(string content)
@@ -120,6 +128,71 @@ public class AgentThoughtBubble : MonoBehaviour
         backgroundRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, textWidth + horizontalPadding);
         backgroundRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, textHeight + verticalPadding);
         messageText.ForceMeshUpdate();
+        Canvas.ForceUpdateCanvases();
+        FitWidthToScreen(content);
+        ClampToScreen();
+    }
+
+    private void FitWidthToScreen(string content)
+    {
+        Camera camera = Camera.main;
+        if (camera == null || messageText == null || messageRect == null || backgroundRect == null)
+            return;
+
+        backgroundRect.GetWorldCorners(worldCorners);
+        float left = camera.WorldToScreenPoint(worldCorners[0]).x;
+        float right = camera.WorldToScreenPoint(worldCorners[2]).x;
+        float renderedWidth = right - left;
+        float availableWidth = Mathf.Max(60f, Screen.width - screenEdgePadding * 2f);
+        if (renderedWidth <= availableWidth)
+            return;
+
+        float shrink = Mathf.Clamp01(availableWidth / renderedWidth);
+        float textWidth = Mathf.Max(minimumTextWidth, messageRect.rect.width * shrink);
+        Vector2 wrappedSize = messageText.GetPreferredValues(content, textWidth, Mathf.Infinity);
+        float textHeight = Mathf.Max(messageText.fontSize, wrappedSize.y);
+
+        messageRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, textWidth);
+        messageRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, textHeight);
+        backgroundRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, textWidth + horizontalPadding);
+        backgroundRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, textHeight + verticalPadding);
+        messageText.ForceMeshUpdate();
+        Canvas.ForceUpdateCanvases();
+    }
+
+    private void ClampToScreen()
+    {
+        Camera camera = Camera.main;
+        if (camera == null || backgroundRect == null)
+            return;
+
+        backgroundRect.GetWorldCorners(worldCorners);
+        float left = camera.WorldToScreenPoint(worldCorners[0]).x;
+        float right = camera.WorldToScreenPoint(worldCorners[2]).x;
+        float bottom = camera.WorldToScreenPoint(worldCorners[0]).y;
+        float top = camera.WorldToScreenPoint(worldCorners[1]).y;
+
+        float deltaX = 0f;
+        if (left < screenEdgePadding)
+            deltaX = screenEdgePadding - left;
+        else if (right > Screen.width - screenEdgePadding)
+            deltaX = Screen.width - screenEdgePadding - right;
+
+        float deltaY = 0f;
+        if (bottom < screenEdgePadding)
+            deltaY = screenEdgePadding - bottom;
+        else if (top > Screen.height - screenEdgePadding)
+            deltaY = Screen.height - screenEdgePadding - top;
+
+        if (Mathf.Approximately(deltaX, 0f) && Mathf.Approximately(deltaY, 0f))
+            return;
+
+        Vector3 screenPosition = camera.WorldToScreenPoint(transform.position);
+        Vector3 shifted = camera.ScreenToWorldPoint(new Vector3(
+            screenPosition.x + deltaX,
+            screenPosition.y + deltaY,
+            screenPosition.z));
+        transform.position += shifted - transform.position;
     }
 
     private bool PrepareContent(string content)
