@@ -477,11 +477,21 @@ MonoBehaviour:
   socialDecay: 0.3
   decisionDelay: 1
   randomness: 5
+  coffeeHoldDuration: 30
+  deskCoffeeLifetime: 30
   navigationRadius: 0.25
   slotArriveDistance: 0.15
+  freeMoveMinDistance: 1.5
+  freeMoveMaxDistance: 6
+  colleagueStopDistance: 0.9
+  movingTargetReplanInterval: 0.45
+  movingTargetTimeout: 12
   useLLMBrain: 1
   brainDecisionInterval: 20
   brainDirectiveTtl: 45
+  useLLMActivityPlanning: 1
+  activityDecisionInterval: 18
+  activityPrefetchThreshold: 1
 --- !u!58 &119022410
 CircleCollider2D:
   m_ObjectHideFlags: 0
@@ -573,6 +583,7 @@ MonoBehaviour:
   animator: {fileID: 952057893}
   characterGroupBaseOrder: 10000
   sortingUnitsPerWorldUnit: 100
+  handAnchor: {fileID: 639650027}
   thoughtBubblesEnabled: 1
   thoughtBubblePrefab: {fileID: 4088053113561712751, guid: ea9f94ee25f440346869932faa5074f8, type: 3}
   thoughtBubble: {fileID: 0}
@@ -707,6 +718,37 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 162166245}
   m_CullTransparentMesh: 1
+--- !u!1 &168687680
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 168687681}
+  m_Layer: 0
+  m_Name: ItemPlacementPoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &168687681
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 168687680}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.61, y: 0.34, z: 0}
+  m_LocalScale: {x: 0.5, y: 0.5, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1375734822}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &188232946
 GameObject:
   m_ObjectHideFlags: 0
@@ -921,6 +963,7 @@ Transform:
   m_ConstrainProportionsScale: 1
   m_Children:
   - {fileID: 284187733}
+  - {fileID: 1409130384}
   m_Father: {fileID: 496072940}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!95 &305066820
@@ -1614,7 +1657,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: New Text
+  m_text: Today is XiaoXia's birthday. Coworkers are gathering to congratulate them.
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
@@ -1821,11 +1864,21 @@ MonoBehaviour:
   socialDecay: 0.35
   decisionDelay: 1
   randomness: 5
+  coffeeHoldDuration: 30
+  deskCoffeeLifetime: 30
   navigationRadius: 0.25
   slotArriveDistance: 0.15
+  freeMoveMinDistance: 1.5
+  freeMoveMaxDistance: 6
+  colleagueStopDistance: 0.9
+  movingTargetReplanInterval: 0.45
+  movingTargetTimeout: 12
   useLLMBrain: 1
   brainDecisionInterval: 20
   brainDirectiveTtl: 45
+  useLLMActivityPlanning: 1
+  activityDecisionInterval: 18
+  activityPrefetchThreshold: 1
 --- !u!114 &496072945
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1855,6 +1908,7 @@ MonoBehaviour:
   animator: {fileID: 305066820}
   characterGroupBaseOrder: 10000
   sortingUnitsPerWorldUnit: 100
+  handAnchor: {fileID: 1409130384}
   thoughtBubblesEnabled: 1
   thoughtBubblePrefab: {fileID: 4088053113561712751, guid: ea9f94ee25f440346869932faa5074f8, type: 3}
   thoughtBubble: {fileID: 0}
@@ -2080,6 +2134,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1949497479}
+  - {fileID: 1377558597}
   m_Father: {fileID: 2072425294}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!95 &522410717
@@ -2300,7 +2355,8 @@ Transform:
   m_LocalPosition: {x: 1.23, y: -1.077, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 755961804}
   m_Father: {fileID: 1704556778}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &568197847
@@ -2321,6 +2377,7 @@ MonoBehaviour:
   slots:
   - offset: {x: 0, y: 0}
     facing: 2
+  itemPlacementPoint: {fileID: 755961804}
   energyChange: -5
   focusChange: -10
   socialChange: -2
@@ -2701,7 +2758,8 @@ Transform:
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1.1, y: 1.1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 1321131135}
   m_Father: {fileID: 2132121408}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!95 &628793450
@@ -2861,6 +2919,37 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!1 &639650026
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 639650027}
+  m_Layer: 0
+  m_Name: HandAnchor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &639650027
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 639650026}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.3, y: -0.15, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 952057891}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &656161424
 GameObject:
   m_ObjectHideFlags: 0
@@ -3018,6 +3107,99 @@ MonoBehaviour:
   rareGachaWeight: 3
   epicGachaWeight: 1
   legendaryGachaWeight: 0.3
+--- !u!1 &700887014
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 700887015}
+  m_Layer: 0
+  m_Name: ItemPlacementPoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &700887015
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 700887014}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.61, y: -0.47, z: 0}
+  m_LocalScale: {x: 0.5, y: 0.5, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1332656398}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &754217919
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 754217920}
+  m_Layer: 0
+  m_Name: ItemPlacementPoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &754217920
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 754217919}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.61, y: 0.46, z: 0}
+  m_LocalScale: {x: 0.5, y: 0.5, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 2059408492}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &755961803
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 755961804}
+  m_Layer: 0
+  m_Name: ItemPlacementPoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &755961804
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 755961803}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0.66, y: 0.6, z: 0}
+  m_LocalScale: {x: 0.5, y: 0.5, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 568197846}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &765906396
 GameObject:
   m_ObjectHideFlags: 0
@@ -3085,11 +3267,21 @@ MonoBehaviour:
   socialDecay: 0.3
   decisionDelay: 1
   randomness: 5
+  coffeeHoldDuration: 30
+  deskCoffeeLifetime: 30
   navigationRadius: 0.25
   slotArriveDistance: 0.15
+  freeMoveMinDistance: 1.5
+  freeMoveMaxDistance: 6
+  colleagueStopDistance: 0.9
+  movingTargetReplanInterval: 0.45
+  movingTargetTimeout: 12
   useLLMBrain: 1
   brainDecisionInterval: 20
   brainDirectiveTtl: 45
+  useLLMActivityPlanning: 1
+  activityDecisionInterval: 18
+  activityPrefetchThreshold: 1
 --- !u!58 &765906399
 CircleCollider2D:
   m_ObjectHideFlags: 0
@@ -3181,6 +3373,7 @@ MonoBehaviour:
   animator: {fileID: 1922343385}
   characterGroupBaseOrder: 10000
   sortingUnitsPerWorldUnit: 100
+  handAnchor: {fileID: 1786624604}
   thoughtBubblesEnabled: 1
   thoughtBubblePrefab: {fileID: 4088053113561712751, guid: ea9f94ee25f440346869932faa5074f8, type: 3}
   thoughtBubble: {fileID: 0}
@@ -3766,7 +3959,8 @@ Transform:
   m_LocalPosition: {x: -0.68, y: -0.89, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 1596577082}
   m_Father: {fileID: 1704556778}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &846646336
@@ -3787,6 +3981,7 @@ MonoBehaviour:
   slots:
   - offset: {x: 0, y: 0}
     facing: 3
+  itemPlacementPoint: {fileID: 1596577082}
   energyChange: -5
   focusChange: -10
   socialChange: -2
@@ -3900,7 +4095,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: New Text
+  m_text: XiaoXia's Birthday
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
@@ -4177,6 +4372,37 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!1 &934396170
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 934396171}
+  m_Layer: 0
+  m_Name: HandAnchor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &934396171
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 934396170}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.3, y: -0.15, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1684868787}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &936658476
 GameObject:
   m_ObjectHideFlags: 0
@@ -4232,6 +4458,7 @@ MonoBehaviour:
     facing: 0
   - offset: {x: -0.5, y: -0.2}
     facing: 3
+  itemPlacementPoint: {fileID: 0}
   energyChange: -2
   focusChange: 5
   socialChange: 35
@@ -4320,6 +4547,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 573892592}
+  - {fileID: 639650027}
   m_Father: {fileID: 119022408}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!212 &952057892
@@ -4424,9 +4652,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8e58a2205992d704faa102cc9bc51a0c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  baseUrl: http://localhost:11434/v1
+  baseUrl: https://api.groq.com/openai/v1
   apiKey: 
-  model: qwen2.5:1.5b
+  apiKeyEnvironmentVariable: GLM_API_KEY
+  model: llama-3.1-8b-instant
   temperature: 0.8
   requestTimeoutSeconds: 60
   memoryLines: 4
@@ -4434,6 +4663,10 @@ MonoBehaviour:
   enableGeneratedConversationPlans: 0
   conversationPlanTimeoutSeconds: 8
   conversationScriptTimeoutSeconds: 30
+  enableActivityPlans: 1
+  activityBatchSize: 4
+  globalActivityPlanIntervalSeconds: 30
+  activityPlanTimeoutSeconds: 30
   personalities: []
 --- !u!4 &966885347
 Transform:
@@ -4939,11 +5172,21 @@ MonoBehaviour:
   socialDecay: 0.6
   decisionDelay: 1
   randomness: 5
+  coffeeHoldDuration: 30
+  deskCoffeeLifetime: 30
   navigationRadius: 0.25
   slotArriveDistance: 0.15
+  freeMoveMinDistance: 1.5
+  freeMoveMaxDistance: 6
+  colleagueStopDistance: 0.9
+  movingTargetReplanInterval: 0.45
+  movingTargetTimeout: 12
   useLLMBrain: 1
   brainDecisionInterval: 20
   brainDirectiveTtl: 45
+  useLLMActivityPlanning: 1
+  activityDecisionInterval: 18
+  activityPrefetchThreshold: 1
 --- !u!58 &1128272433
 CircleCollider2D:
   m_ObjectHideFlags: 0
@@ -5035,6 +5278,7 @@ MonoBehaviour:
   animator: {fileID: 1684868788}
   characterGroupBaseOrder: 10000
   sortingUnitsPerWorldUnit: 100
+  handAnchor: {fileID: 934396171}
   thoughtBubblesEnabled: 1
   thoughtBubblePrefab: {fileID: 4088053113561712751, guid: ea9f94ee25f440346869932faa5074f8, type: 3}
   thoughtBubble: {fileID: 0}
@@ -5394,6 +5638,37 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!1 &1307961232
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1307961233}
+  m_Layer: 0
+  m_Name: CoffeeSpawnPoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1307961233
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1307961232}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: -0.322, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 2047264635}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1308314497
 GameObject:
   m_ObjectHideFlags: 0
@@ -5478,6 +5753,37 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!1 &1321131134
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1321131135}
+  m_Layer: 0
+  m_Name: HandAnchor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1321131135
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1321131134}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.3, y: -0.15, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 628793449}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1332656397
 GameObject:
   m_ObjectHideFlags: 0
@@ -5508,7 +5814,8 @@ Transform:
   m_LocalPosition: {x: -4.83, y: 1.05, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 700887015}
   m_Father: {fileID: 1704556778}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &1332656399
@@ -5529,6 +5836,7 @@ MonoBehaviour:
   slots:
   - offset: {x: 0, y: 0}
     facing: 3
+  itemPlacementPoint: {fileID: 700887015}
   energyChange: -5
   focusChange: -10
   socialChange: -2
@@ -5615,7 +5923,8 @@ Transform:
   m_LocalPosition: {x: -0.68, y: 1.1, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 168687681}
   m_Father: {fileID: 1704556778}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &1375734823
@@ -5636,6 +5945,7 @@ MonoBehaviour:
   slots:
   - offset: {x: 0, y: 0}
     facing: 3
+  itemPlacementPoint: {fileID: 168687681}
   energyChange: -5
   focusChange: -10
   socialChange: -2
@@ -5692,6 +6002,68 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!1 &1377558596
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1377558597}
+  m_Layer: 0
+  m_Name: HandAnchor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1377558597
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1377558596}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.3, y: -0.15, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 522410716}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1409130383
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1409130384}
+  m_Layer: 0
+  m_Name: HandAnchor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1409130384
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1409130383}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.3, y: -0.15, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 305066819}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1457456255
 GameObject:
   m_ObjectHideFlags: 0
@@ -6026,6 +6398,37 @@ Transform:
   - {fileID: 459004068}
   m_Father: {fileID: 372631018}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1596577081
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1596577082}
+  m_Layer: 0
+  m_Name: ItemPlacementPoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1596577082
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1596577081}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.61, y: 0.24, z: 0}
+  m_LocalScale: {x: 0.5, y: 0.5, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 846646335}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1615558614
 GameObject:
   m_ObjectHideFlags: 0
@@ -6121,6 +6524,7 @@ GameObject:
   - component: {fileID: 1629408248}
   - component: {fileID: 1629408250}
   - component: {fileID: 1629408249}
+  - component: {fileID: 1629408251}
   m_Layer: 0
   m_Name: CoffeePoint
   m_TagString: Untagged
@@ -6161,6 +6565,7 @@ MonoBehaviour:
   slots:
   - offset: {x: 0, y: 0}
     facing: 1
+  itemPlacementPoint: {fileID: 0}
   energyChange: 35
   focusChange: 5
   socialChange: 0
@@ -6217,6 +6622,22 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!114 &1629408251
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1629408247}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 323aead9de2c70a408cb7b190f87321b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  coffeeSpawnPoint: {fileID: 1307961233}
+  coffeePrefab: {fileID: 2561711306719112999, guid: 15debb3ead17d5642bbd1dca80dbcea9, type: 3}
+  coffeeSpritesSet: {fileID: 11400000, guid: d48ad5934fe2447448292f775fa0d80b, type: 2}
+  spawnLifetime: 15
 --- !u!1 &1630713340
 GameObject:
   m_ObjectHideFlags: 0
@@ -6305,6 +6726,7 @@ MonoBehaviour:
     facing: 3
   - offset: {x: 0, y: -0.5}
     facing: 1
+  itemPlacementPoint: {fileID: 0}
   energyChange: 15
   focusChange: 25
   socialChange: 0
@@ -6557,6 +6979,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 219844883}
+  - {fileID: 934396171}
   m_Father: {fileID: 1128272431}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!95 &1684868788
@@ -6702,7 +7125,8 @@ Transform:
   m_LocalPosition: {x: 1.233, y: 1.019, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 1884976730}
   m_Father: {fileID: 1704556778}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &1706768843
@@ -6723,6 +7147,7 @@ MonoBehaviour:
   slots:
   - offset: {x: 0, y: 0}
     facing: 2
+  itemPlacementPoint: {fileID: 1884976730}
   energyChange: -5
   focusChange: -10
   socialChange: -2
@@ -6811,6 +7236,37 @@ Transform:
   - {fileID: 1308314498}
   m_Father: {fileID: 372631018}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1786624603
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1786624604}
+  m_Layer: 0
+  m_Name: HandAnchor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1786624604
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1786624603}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.3, y: -0.15, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1922343384}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1819649924
 GameObject:
   m_ObjectHideFlags: 0
@@ -6886,7 +7342,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1882662511}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
   m_Name: 
@@ -6917,6 +7373,37 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1882662511}
   m_CullTransparentMesh: 1
+--- !u!1 &1884976729
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1884976730}
+  m_Layer: 0
+  m_Name: ItemPlacementPoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1884976730
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1884976729}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0.82, y: -0.55, z: 0}
+  m_LocalScale: {x: 0.5, y: 0.5, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1706768842}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1922343383
 GameObject:
   m_ObjectHideFlags: 0
@@ -6949,6 +7436,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 39699002}
+  - {fileID: 1786624604}
   m_Father: {fileID: 765906397}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!95 &1922343385
@@ -7087,6 +7575,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 846348101}
+  - {fileID: 1307961233}
   m_Father: {fileID: 614225996}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2059408491
@@ -7119,7 +7608,8 @@ Transform:
   m_LocalPosition: {x: -4.851, y: -0.967, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 754217920}
   m_Father: {fileID: 1704556778}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &2059408493
@@ -7140,6 +7630,7 @@ MonoBehaviour:
   slots:
   - offset: {x: 0, y: 0}
     facing: 3
+  itemPlacementPoint: {fileID: 754217920}
   energyChange: -5
   focusChange: -10
   socialChange: -2
@@ -7264,11 +7755,21 @@ MonoBehaviour:
   socialDecay: 0.1
   decisionDelay: 1
   randomness: 5
+  coffeeHoldDuration: 30
+  deskCoffeeLifetime: 30
   navigationRadius: 0.25
   slotArriveDistance: 0.15
+  freeMoveMinDistance: 1.5
+  freeMoveMaxDistance: 6
+  colleagueStopDistance: 0.9
+  movingTargetReplanInterval: 0.45
+  movingTargetTimeout: 12
   useLLMBrain: 1
   brainDecisionInterval: 20
   brainDirectiveTtl: 45
+  useLLMActivityPlanning: 1
+  activityDecisionInterval: 18
+  activityPrefetchThreshold: 1
 --- !u!58 &2072425296
 CircleCollider2D:
   m_ObjectHideFlags: 0
@@ -7360,6 +7861,7 @@ MonoBehaviour:
   animator: {fileID: 522410717}
   characterGroupBaseOrder: 10000
   sortingUnitsPerWorldUnit: 100
+  handAnchor: {fileID: 1377558597}
   thoughtBubblesEnabled: 1
   thoughtBubblePrefab: {fileID: 4088053113561712751, guid: ea9f94ee25f440346869932faa5074f8, type: 3}
   thoughtBubble: {fileID: 0}
@@ -7515,11 +8017,21 @@ MonoBehaviour:
   socialDecay: 1.2
   decisionDelay: 1
   randomness: 5
+  coffeeHoldDuration: 30
+  deskCoffeeLifetime: 30
   navigationRadius: 0.25
   slotArriveDistance: 0.15
+  freeMoveMinDistance: 1.5
+  freeMoveMaxDistance: 6
+  colleagueStopDistance: 0.9
+  movingTargetReplanInterval: 0.45
+  movingTargetTimeout: 12
   useLLMBrain: 1
   brainDecisionInterval: 20
   brainDirectiveTtl: 45
+  useLLMActivityPlanning: 1
+  activityDecisionInterval: 18
+  activityPrefetchThreshold: 1
 --- !u!58 &2132121410
 CircleCollider2D:
   m_ObjectHideFlags: 0
@@ -7611,6 +8123,7 @@ MonoBehaviour:
   animator: {fileID: 628793450}
   characterGroupBaseOrder: 10000
   sortingUnitsPerWorldUnit: 100
+  handAnchor: {fileID: 1321131135}
   thoughtBubblesEnabled: 1
   thoughtBubblePrefab: {fileID: 4088053113561712751, guid: ea9f94ee25f440346869932faa5074f8, type: 3}
   thoughtBubble: {fileID: 0}

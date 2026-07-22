@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -29,7 +30,18 @@ public sealed class AgentActivity
     public OfficeActionPoint actionPoint;
     public AIWorkerAgent targetAgent;
     public float duration;
+    public string reason;
     public string thought;
+    public string customActionLabel;
+    public float energyChange;
+    public float focusChange;
+    public float socialChange;
+    public float productivityChange;
+    public string socialMemorySubject;
+    public bool completesSocialCommitment;
+    public bool interactionAttempted;
+    public bool waitingForConversationLogged;
+    public bool interactionSucceeded;
 }
 
 [RequireComponent(typeof(Rigidbody2D))]
@@ -80,6 +92,10 @@ public class AIWorkerAgent : MonoBehaviour
     public float decisionDelay = 1f;
     public float randomness = 5f;
 
+    [Header("Item Handling")]
+    [Min(0f)] public float coffeeHoldDuration = 30f;
+    [Min(0f)] public float deskCoffeeLifetime = 30f;
+
     [Header("Obstacle Clearance & Arrival")]
     [Tooltip("Body radius used for pathfinding and physical obstacle checks.")]
     [FormerlySerializedAs("avoidanceRadius")]
@@ -117,6 +133,8 @@ public class AIWorkerAgent : MonoBehaviour
     private OfficeWorkerMotor2D motor;
     private AgentPresentation2D presentation;
     private AgentConversationController conversation;
+    private AIWorkerAgent nearbyConversationCaller;
+    private float nearbyConversationReservationUntil;
     private AgentEffects effects;
     private AgentNavigationController navigation;
     private OfficeCrowdCoordinator2D crowd;
@@ -132,6 +150,7 @@ public class AIWorkerAgent : MonoBehaviour
     private bool activityPlanInFlight;
     private readonly Queue<OfficeActivityPlan> plannedActivities = new();
     private OfficeActionPoint pendingSocialPlanAction;
+    private string pendingSocialCommitmentSubject;
     private float nextSocialPlanTime;
     private float nextActivityPlanTime;
     private float nextActivityPlanAttemptTime;
@@ -408,9 +427,17 @@ public class AIWorkerAgent : MonoBehaviour
             OfficeActionType? previousType = LastQueuedActivityType();
             foreach (OfficeActivityPlan plan in plans)
             {
-                if (plan == null || previousType == plan.actionType)
+                if (plan == null)
+                    continue;
+                bool isCommitment = !string.IsNullOrWhiteSpace(plan.socialMemorySubject);
+                if (isCommitment && HasScheduledCommitment(plan.socialMemorySubject))
+                    continue;
+                if (!isCommitment && previousType == plan.actionType)
                     continue;
                 plannedActivities.Enqueue(plan);
+                Debug.Log("[Activity plan] " + DisplayName + ": " + plan.actionType
+                    + (string.IsNullOrWhiteSpace(plan.targetAgent) ? "" : " -> " + plan.targetAgent)
+                    + " | reason: " + plan.reason + " | thought: " + plan.thought, this);
                 previousType = plan.actionType;
             }
         }
@@ -426,6 +453,23 @@ public class AIWorkerAgent : MonoBehaviour
             if (plan != null)
                 result = plan.actionType;
         return result;
+    }
+
+    private bool HasScheduledCommitment(string subject)
+    {
+        if (string.IsNullOrWhiteSpace(subject))
+            return false;
+        if (currentActivity != null && string.Equals(currentActivity.socialMemorySubject, subject,
+                System.StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (string.Equals(pendingSocialCommitmentSubject, subject,
+                System.StringComparison.OrdinalIgnoreCase))
+            return true;
+        foreach (OfficeActivityPlan queued in plannedActivities)
+            if (queued != null && string.Equals(queued.socialMemorySubject, subject,
+                    System.StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
     }
 
     private bool TryStartNextPlannedActivity()
@@ -444,19 +488,26 @@ public class AIWorkerAgent : MonoBehaviour
         if (plan == null)
             return false;
 
-        OfficeActionPoint selected = PickBestActionOfType(plan.actionType);
+        bool isCustom = plan.actionType == OfficeActionType.Custom;
+        OfficeActionPoint selected = isCustom ? null : PickBestActionOfType(plan.actionType);
         OfficeDestinationMode mode = ResolveDestinationMode(plan, selected);
 
         if (mode == OfficeDestinationMode.ActionPoint)
         {
             if (selected == null)
-                return false;
-            if (AgentConversationController.IsSocialSpot(selected.actionType))
             {
-                BeginSocialPlanning(selected);
-                return true;
+                mode = OfficeDestinationMode.FreePosition;
+                isCustom = true;
             }
-            return TryStartAction(selected, plan);
+            else
+            {
+                if (AgentConversationController.IsSocialSpot(selected.actionType))
+                {
+                    BeginSocialPlanning(selected, plan);
+                    return true;
+                }
+                return TryStartAction(selected, plan);
+            }
         }
 
         AgentActivity activity = new()
@@ -464,7 +515,15 @@ public class AIWorkerAgent : MonoBehaviour
             actionType = plan.actionType,
             destinationMode = mode,
             duration = Mathf.Clamp(plan.durationSeconds, 2f, 30f),
-            thought = plan.thought
+            reason = plan.reason,
+            thought = plan.thought,
+            customActionLabel = plan.customActionLabel,
+            energyChange = plan.energyChange,
+            focusChange = plan.focusChange,
+            socialChange = plan.socialChange,
+            productivityChange = plan.productivityChange,
+            socialMemorySubject = plan.socialMemorySubject,
+            completesSocialCommitment = plan.completesSocialCommitment
         };
 
         if (mode == OfficeDestinationMode.FollowAgent)
@@ -481,6 +540,11 @@ public class AIWorkerAgent : MonoBehaviour
         OfficeActivityPlan plan,
         OfficeActionPoint selected)
     {
+        if (plan.actionType == OfficeActionType.Custom)
+            return plan.destinationMode == OfficeDestinationMode.CurrentPosition
+                ? OfficeDestinationMode.CurrentPosition
+                : OfficeDestinationMode.FreePosition;
+
         switch (plan.actionType)
         {
             case OfficeActionType.ApproachColleague:
@@ -513,10 +577,13 @@ public class AIWorkerAgent : MonoBehaviour
         currentActivity = activity;
         stillSeated = false;
 
+        string activityThought = !string.IsNullOrWhiteSpace(activity.thought)
+            ? activity.thought : activity.customActionLabel;
+
         if (activity.destinationMode == OfficeDestinationMode.CurrentPosition)
         {
             activity.destination = GetPosition();
-            ShowActivityThought(activity.thought);
+            ShowActivityThought(activityThought);
             StartActing();
             return true;
         }
@@ -530,7 +597,14 @@ public class AIWorkerAgent : MonoBehaviour
                 return false;
             }
 
-            ShowActivityThought(activity.thought);
+            if (activity.actionType == OfficeActionType.ApproachColleague)
+            {
+                Debug.Log("[Thought] " + DisplayName + ": going to speak with "
+                    + activity.targetAgent.DisplayName
+                    + (string.IsNullOrWhiteSpace(activity.reason) ? "" : " about " + activity.reason), this);
+            }
+            else
+                ShowActivityThought(activityThought);
             state = WorkerState.Moving;
             return true;
         }
@@ -542,7 +616,7 @@ public class AIWorkerAgent : MonoBehaviour
         }
 
         activity.destination = destination;
-        ShowActivityThought(activity.thought);
+        ShowActivityThought(activityThought);
         state = WorkerState.Moving;
         return true;
     }
@@ -563,7 +637,10 @@ public class AIWorkerAgent : MonoBehaviour
             actionPoint = action,
             destination = action.GetTargetPosition(this),
             duration = plan != null ? Mathf.Clamp(plan.durationSeconds, 2f, 30f) : action.useTime,
-            thought = plan != null ? plan.thought : ""
+            reason = plan != null ? plan.reason : "",
+            thought = plan != null ? plan.thought : "",
+            socialMemorySubject = plan != null ? plan.socialMemorySubject : "",
+            completesSocialCommitment = plan != null && plan.completesSocialCommitment
         };
         ShowActivityThought(currentActivity.thought);
 
@@ -595,7 +672,8 @@ public class AIWorkerAgent : MonoBehaviour
         return invitedSocialAction;
     }
 
-    private async void BeginSocialPlanning(OfficeActionPoint action)
+    private async void BeginSocialPlanning(OfficeActionPoint action,
+        OfficeActivityPlan commitmentPlan = null)
     {
         if (action == null || socialPlanInFlight)
             return;
@@ -609,11 +687,14 @@ public class AIWorkerAgent : MonoBehaviour
 
         socialPlanInFlight = true;
         pendingSocialPlanAction = action;
+        pendingSocialCommitmentSubject = commitmentPlan?.socialMemorySubject;
         stateTimer = 0.25f;
         ConversationPlan plan = null;
         LLMBrainService brain = LLMBrainService.Instance;
 
-        if (useLLMBrain && brain != null && brain.EnableGeneratedConversationPlans
+        bool hasCommitment = commitmentPlan != null
+            && !string.IsNullOrWhiteSpace(commitmentPlan.socialMemorySubject);
+        if (!hasCommitment && useLLMBrain && brain != null && brain.EnableGeneratedConversationPlans
             && Time.time >= nextSocialPlanTime)
         {
             List<ConversationParticipantContext> coworkerContexts = new();
@@ -634,7 +715,29 @@ public class AIWorkerAgent : MonoBehaviour
 
         float expiresAt = Time.time + Mathf.Max(15f, brainDirectiveTtl);
         ConversationIntent intent = null;
-        if (plan != null)
+        if (hasCommitment)
+        {
+            AIWorkerAgent target = FindCandidate(candidates, commitmentPlan.targetAgent);
+            if (target != null)
+            {
+                intent = new ConversationIntent
+                {
+                    initiatorAgentId = AgentId,
+                    initiatorName = DisplayName,
+                    intendedPartnerName = target.DisplayName,
+                    topic = commitmentPlan.socialMemorySubject,
+                    openingLine = !string.IsNullOrWhiteSpace(commitmentPlan.socialOpeningLine)
+                        ? commitmentPlan.socialOpeningLine
+                        : target.DisplayName + ", are you still up for what we planned?",
+                    generatedByModel = !string.IsNullOrWhiteSpace(
+                        commitmentPlan.socialOpeningLine),
+                    actionType = action.actionType,
+                    createdAt = Time.time,
+                    expiresAt = expiresAt
+                };
+            }
+        }
+        else if (plan != null)
         {
             AIWorkerAgent target = FindCandidate(candidates, plan.targetAgent);
             if (target != null)
@@ -653,10 +756,12 @@ public class AIWorkerAgent : MonoBehaviour
                 };
             }
         }
-        intent ??= conversation.CreateLocalConversationIntent(action, expiresAt);
+        if (intent == null && !hasCommitment)
+            intent = conversation.CreateLocalConversationIntent(action, expiresAt);
 
         socialPlanInFlight = false;
         pendingSocialPlanAction = null;
+        pendingSocialCommitmentSubject = null;
         if (intent == null)
         {
             stateTimer = decisionDelay;
@@ -667,7 +772,7 @@ public class AIWorkerAgent : MonoBehaviour
         AIWorkerAgent invited = FindCandidate(candidates, intent.intendedPartnerName);
         invited?.ReceiveSocialInvitation(action, DisplayName, expiresAt);
 
-        if (!TryStartAction(action))
+        if (!TryStartAction(action, commitmentPlan))
             conversationIntent = null;
     }
 
@@ -820,6 +925,7 @@ public class AIWorkerAgent : MonoBehaviour
         AddActivityType(result, OfficeActionType.CheckPhone);
         if (hasAvailableCoworker)
             AddActivityType(result, OfficeActionType.ApproachColleague);
+        AddActivityType(result, OfficeActionType.Custom);
         return result;
     }
 
@@ -999,6 +1105,15 @@ public class AIWorkerAgent : MonoBehaviour
         }
     }
 
+    private string GetActionLabel(AgentActivity activity)
+    {
+        if (activity == null)
+            return "";
+        if (!string.IsNullOrWhiteSpace(activity.customActionLabel))
+            return activity.customActionLabel;
+        return GetActionLabel(activity.actionType);
+    }
+
     private float EstimateRoutePenalty(OfficeActionPoint actionPoint)
     {
         if (grid == null || actionPoint == null)
@@ -1097,10 +1212,32 @@ public class AIWorkerAgent : MonoBehaviour
             return true;
         }
 
+        if (conversation != null && conversation.IsInConversation)
+            return false;
+
         Vector2 toTarget = currentActivity.targetAgent.GetPosition() - GetPosition();
         presentation.SetFacing(toTarget);
-        if (Time.time >= trackedActivityDeadline
-            || toTarget.magnitude <= colleagueStopDistance * 1.45f)
+        if (currentActivity.interactionAttempted)
+            return false;
+
+        if (toTarget.magnitude <= colleagueStopDistance * 1.45f)
+        {
+            if (TryBeginNearbyInteraction(currentActivity))
+                return true;
+
+            // Do not call across an existing conversation. Wait nearby and retry when it ends.
+            trackedActivityDeadline = Mathf.Max(trackedActivityDeadline, Time.time + 3f);
+            stateTimer = Mathf.Max(stateTimer, 3f);
+            if (!currentActivity.waitingForConversationLogged)
+            {
+                Debug.Log("[Approach waiting] " + DisplayName + " is near "
+                    + currentActivity.targetAgent.DisplayName + " and will speak when they finish talking", this);
+                currentActivity.waitingForConversationLogged = true;
+            }
+            return true;
+        }
+
+        if (Time.time >= trackedActivityDeadline)
             return false;
 
         if (!PlanTowardTrackedTarget())
@@ -1117,6 +1254,12 @@ public class AIWorkerAgent : MonoBehaviour
         stateTimer = currentActivity != null
             ? Mathf.Max(0.1f, currentActivity.duration)
             : currentAction != null ? currentAction.useTime : 1f;
+        OfficeActionType startedType = currentActivity != null
+            ? currentActivity.actionType
+            : currentAction != null ? currentAction.actionType : OfficeActionType.Think;
+        Debug.Log("[Activity started] " + DisplayName + ": " + startedType
+            + (currentActivity?.targetAgent == null ? "" : " -> " + currentActivity.targetAgent.DisplayName)
+            + (string.IsNullOrWhiteSpace(currentActivity?.reason) ? "" : " | " + currentActivity.reason), this);
         socialArrivalTime = currentAction != null && AgentConversationController.IsSocialSpot(currentAction.actionType)
             ? Time.time
             : -1f;
@@ -1133,6 +1276,21 @@ public class AIWorkerAgent : MonoBehaviour
             presentation.SetFacing(currentAction.GetFacingVector(this));
         else if (currentActivity != null && currentActivity.targetAgent != null)
             presentation.SetFacing(currentActivity.targetAgent.GetPosition() - GetPosition());
+
+        if (currentActivity != null
+            && currentActivity.actionType == OfficeActionType.ApproachColleague
+            && currentActivity.targetAgent != null)
+        {
+            stateTimer = Mathf.Max(stateTimer, 30f);
+            TryBeginNearbyInteraction(currentActivity);
+        }
+
+        if (currentAction != null && currentAction.actionType == OfficeActionType.CoffeeMachine)
+        {
+            CoffeeMachine machine = currentAction.GetComponent<CoffeeMachine>();
+            if (machine != null)
+                machine.SpawnRandomCoffeeCup();
+        }
 
         conversation.OnStartedActing(currentAction);
     }
@@ -1177,19 +1335,119 @@ public class AIWorkerAgent : MonoBehaviour
     public void PickupItem(SceneItem item, float holdDuration = 0f)
     {
         if (presentation != null)
+        {
+            item?.CancelScheduledDestroy();
             presentation.AttachItemToHand(item, default, default, default, holdDuration);
-    }
-
-    public void DropItem()
-    {
-        if (presentation != null)
-            presentation.ClearHeldItem();
+        }
     }
 
     public void PlaceHeldItemOnDesk(OfficeActionPoint desk)
     {
         if (presentation != null)
-            presentation.PlaceHeldItemAt(desk.transform, Vector3.zero);
+            presentation.PlaceHeldItemAt(desk != null ? desk.GetItemPlacementTransform() : null, Vector3.zero, deskCoffeeLifetime);
+    }
+
+    public bool GiveHeldItemTo(AIWorkerAgent recipient)
+    {
+        if (presentation == null || recipient == null || recipient.presentation == null
+            || !presentation.IsHolding || recipient.presentation.IsHolding)
+            return false;
+        SceneItem item = presentation.ReleaseHeldItem();
+        if (item == null)
+            return false;
+        recipient.PickupItem(item, recipient.coffeeHoldDuration);
+        Debug.Log("[Item delivered] " + DisplayName + " gave coffee to " +
+            recipient.DisplayName, this);
+        return true;
+    }
+
+    private bool TryBeginNearbyInteraction(AgentActivity activity)
+    {
+        if (activity == null || activity.interactionAttempted || activity.targetAgent == null)
+            return false;
+        if (Vector2.Distance(GetPosition(), activity.targetAgent.GetPosition())
+            > colleagueStopDistance * 1.55f)
+            return false;
+        if (!activity.targetAgent.CanPauseForNearbyColleague(this))
+            return false;
+
+        activity.interactionAttempted = true;
+        string call = activity.targetAgent.DisplayName + "!";
+        Debug.Log("[Call nearby] " + DisplayName + " called "
+            + activity.targetAgent.DisplayName, this);
+        Debug.Log("[Chat] " + DisplayName + ": " + call, this);
+        ShowThought(DisplayName + "\n" + call);
+        activityThoughtVisible = true;
+
+        activity.targetAgent.PauseForNearbyColleague(
+            this, Mathf.Max(15f, activity.duration + 12f));
+        StartCoroutine(BeginApproachConversationAfterGreeting(activity));
+        return true;
+    }
+
+    private IEnumerator BeginApproachConversationAfterGreeting(AgentActivity activity)
+    {
+        yield return new WaitForSeconds(0.9f);
+        if (currentActivity != activity || activity.targetAgent == null)
+            yield break;
+
+        string opening = BuildApproachOpening(activity);
+        string topic = !string.IsNullOrWhiteSpace(activity.reason) ? activity.reason : opening;
+        bool started = conversation.BeginDirectConversation(activity.targetAgent, opening, topic);
+        activity.interactionSucceeded = started;
+        Debug.Log("[Approach interaction] " + DisplayName + " -> "
+            + activity.targetAgent.DisplayName + ": "
+            + (started ? "conversation started" : "conversation could not start"), this);
+    }
+
+    public void PauseForNearbyColleague(AIWorkerAgent caller, float seconds)
+    {
+        if (caller == null || caller == this)
+            return;
+
+        nearbyConversationCaller = caller;
+        nearbyConversationReservationUntil = Time.time + 3f;
+
+        if (currentAction != null)
+        {
+            currentAction.Release(this);
+            currentAction = null;
+        }
+        navigation.Clear();
+        ClearCurrentActivity();
+        stillSeated = false;
+        currentActivity = new AgentActivity
+        {
+            actionType = OfficeActionType.Custom,
+            destinationMode = OfficeDestinationMode.CurrentPosition,
+            duration = Mathf.Max(2f, seconds),
+            reason = "respond to " + caller.DisplayName,
+            customActionLabel = "talk with " + caller.DisplayName
+        };
+        presentation.SetFacing(caller.GetPosition() - GetPosition());
+        state = WorkerState.Acting;
+        stateTimer = currentActivity.duration;
+        string response = "Yes, " + caller.DisplayName + "?";
+        Debug.Log("[Chat] " + DisplayName + ": " + response, this);
+        ShowThought(DisplayName + "\n" + response);
+        activityThoughtVisible = true;
+    }
+
+    private bool CanPauseForNearbyColleague(AIWorkerAgent caller)
+    {
+        if (caller == null || caller == this || conversation == null
+            || conversation.IsInConversation)
+            return false;
+        if (nearbyConversationCaller != null && nearbyConversationCaller != caller
+            && Time.time < nearbyConversationReservationUntil)
+            return false;
+
+        bool interruptible = state == WorkerState.Thinking || currentAction == null
+            || currentAction.actionType == OfficeActionType.WorkDesk
+            || currentAction.actionType == OfficeActionType.CheckPhone;
+        bool protectedCommitment = currentActivity != null
+            && !string.IsNullOrWhiteSpace(currentActivity.socialMemorySubject);
+        return interruptible && !protectedCommitment;
     }
 
     private void FinishAction()
@@ -1208,7 +1466,7 @@ public class AIWorkerAgent : MonoBehaviour
                 CoffeeMachine machine = finishedAction.GetComponent<CoffeeMachine>();
                 SceneItem cup = machine != null ? machine.ConsumeLastCup() : null;
                 if (cup != null)
-                    PickupItem(cup, 30f);
+                    PickupItem(cup, coffeeHoldDuration);
             }
 
             currentAction.Release(this);
@@ -1230,7 +1488,27 @@ public class AIWorkerAgent : MonoBehaviour
             ApplyFlexibleActivityEffects(finishedType.Value);
 
         if (finishedType.HasValue)
-            lastActionLabel = GetActionLabel(finishedType.Value);
+            lastActionLabel = GetActionLabel(currentActivity);
+
+        if (finishedType.HasValue)
+            Debug.Log("[Activity finished] " + DisplayName + ": " + lastActionLabel, this);
+
+        bool commitmentCompleted = currentActivity != null
+            && currentActivity.completesSocialCommitment;
+        if (commitmentCompleted && currentActivity.actionType == OfficeActionType.ApproachColleague)
+        {
+            string commitmentSubject = currentActivity.socialMemorySubject ?? "";
+            bool itemDelivery = commitmentSubject.IndexOf("coffee",
+                    System.StringComparison.OrdinalIgnoreCase) >= 0
+                || commitmentSubject.IndexOf("drink",
+                    System.StringComparison.OrdinalIgnoreCase) >= 0;
+            commitmentCompleted = itemDelivery
+                ? GiveHeldItemTo(currentActivity.targetAgent)
+                : currentActivity.interactionSucceeded;
+        }
+        if (commitmentCompleted && !string.IsNullOrWhiteSpace(currentActivity.socialMemorySubject))
+            LLMBrainService.Instance?.CompleteSocialCommitment(
+                AgentId, currentActivity.socialMemorySubject);
 
         PhysicalVirtualInteractionBridge bridge = PhysicalVirtualInteractionBridge.Instance;
         if (bridge != null)
@@ -1254,6 +1532,19 @@ public class AIWorkerAgent : MonoBehaviour
 
     private void ApplyFlexibleActivityEffects(OfficeActionType actionType)
     {
+        if (currentActivity != null && (currentActivity.energyChange != 0f
+            || currentActivity.focusChange != 0f
+            || currentActivity.socialChange != 0f
+            || currentActivity.productivityChange != 0f))
+        {
+            ApplyEffects(
+                currentActivity.energyChange,
+                currentActivity.focusChange,
+                currentActivity.socialChange,
+                currentActivity.productivityChange);
+            return;
+        }
+
         switch (actionType)
         {
             case OfficeActionType.PhoneCall:
@@ -1279,8 +1570,50 @@ public class AIWorkerAgent : MonoBehaviour
         if (string.IsNullOrWhiteSpace(thought))
             return;
 
+        Debug.Log("[Thought] " + DisplayName + ": " + thought, this);
         ShowThought(thought);
         activityThoughtVisible = true;
+    }
+
+    private string BuildApproachOpening(AgentActivity activity)
+    {
+        string target = activity?.targetAgent != null
+            ? activity.targetAgent.DisplayName : "there";
+        string subject = activity?.thought?.Trim();
+        if (!string.IsNullOrWhiteSpace(activity?.socialMemorySubject)
+            && (activity.socialMemorySubject.IndexOf("coffee",
+                    System.StringComparison.OrdinalIgnoreCase) >= 0
+                || activity.socialMemorySubject.IndexOf("drink",
+                    System.StringComparison.OrdinalIgnoreCase) >= 0))
+            return target + ", I brought the coffee I promised.";
+
+        string reason = activity?.reason?.Trim().TrimEnd('.', '!', '?');
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            if (reason.IndexOf("happy birthday", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return target + ", happy birthday!";
+            const string advicePrefix = "Ask for advice on ";
+            if (reason.StartsWith(advicePrefix, System.StringComparison.OrdinalIgnoreCase))
+                return target + ", can I ask your advice about "
+                    + reason.Substring(advicePrefix.Length).Trim() + "?";
+            const string discussPrefix = "Discuss ";
+            if (reason.StartsWith(discussPrefix, System.StringComparison.OrdinalIgnoreCase))
+                return target + ", can we talk about "
+                    + reason.Substring(discussPrefix.Length).Trim() + "?";
+            const string checkPrefix = "Check ";
+            if (reason.StartsWith(checkPrefix, System.StringComparison.OrdinalIgnoreCase))
+                return target + ", can I ask about "
+                    + reason.Substring(checkPrefix.Length).Trim() + "?";
+        }
+
+        if (string.IsNullOrWhiteSpace(subject)
+            || subject.StartsWith("I should ", System.StringComparison.OrdinalIgnoreCase)
+            || subject.StartsWith("I want ", System.StringComparison.OrdinalIgnoreCase)
+            || subject.StartsWith("Need to ", System.StringComparison.OrdinalIgnoreCase))
+            return target + ", can I ask you something?";
+        if (subject.IndexOf(target, System.StringComparison.OrdinalIgnoreCase) >= 0)
+            return subject;
+        return target + ", " + char.ToLowerInvariant(subject[0]) + subject.Substring(1);
     }
 
     private void ClearCurrentActivity()

@@ -25,6 +25,22 @@ public sealed class ConversationTurn
     public string line;
 }
 
+public sealed class SocialMemoryEntry
+{
+    public string type;
+    public string sourceAgent;
+    public string targetAgent;
+    public string subject;
+    public bool isPrivate;
+    public string status;
+}
+
+public sealed class ConversationScript
+{
+    public readonly List<ConversationTurn> turns = new();
+    public readonly List<SocialMemoryEntry> socialEvents = new();
+}
+
 public sealed class OfficeActivityPlan
 {
     public OfficeActionType actionType;
@@ -34,6 +50,14 @@ public sealed class OfficeActivityPlan
     public float durationSeconds;
     public string reason;
     public string thought;
+    public string customActionLabel;
+    public float energyChange;
+    public float focusChange;
+    public float socialChange;
+    public float productivityChange;
+    public string socialMemorySubject;
+    public bool completesSocialCommitment;
+    public string socialOpeningLine;
 }
 
 public enum OfficeDestinationMode
@@ -51,6 +75,7 @@ public class AgentProfile
     public string personality;
     public string birthday;
     public readonly List<string> memory = new();
+    public readonly List<SocialMemoryEntry> socialMemory = new();
     public readonly List<string> recentTopics = new();
     public readonly List<string> recentOpenings = new();
     public readonly List<string> recentUtterances = new();
@@ -73,7 +98,7 @@ public class LLMBrainService : MonoBehaviour
     [SerializeField] private string apiKey = "";
     [Tooltip("Environment variable used when Api Key is empty. Checked before GLM_API_KEY, ZHIPUAI_API_KEY, and ZAI_API_KEY fallbacks.")]
     [SerializeField] private string apiKeyEnvironmentVariable = "GLM_API_KEY";
-    [Tooltip("GLM model id. glm-4.7-flash is currently free on Z.AI and is useful for smoke testing quota/API access.")]
+    [Tooltip("GLM model id. glm-4.7-flash is the free model; glm-4.7 requires account balance or a resource package.")]
     [SerializeField] private string model = "glm-4.7-flash";
 
     [Header("Generation")]
@@ -236,7 +261,14 @@ public class LLMBrainService : MonoBehaviour
         {
             if (string.IsNullOrWhiteSpace(candidate))
                 continue;
-            string value = Environment.GetEnvironmentVariable(candidate.Trim());
+            string variableName = candidate.Trim();
+            string value = Environment.GetEnvironmentVariable(variableName);
+            if (string.IsNullOrWhiteSpace(value))
+                value = Environment.GetEnvironmentVariable(
+                    variableName, EnvironmentVariableTarget.User);
+            if (string.IsNullOrWhiteSpace(value))
+                value = Environment.GetEnvironmentVariable(
+                    variableName, EnvironmentVariableTarget.Machine);
             if (!string.IsNullOrWhiteSpace(value))
                 return value.Trim();
         }
@@ -307,10 +339,15 @@ public class LLMBrainService : MonoBehaviour
             snapshot.Append("- ").Append(DisplayName(profile, profile.agentId)).Append(": ");
             snapshot.Append("birthday=").Append(string.IsNullOrWhiteSpace(profile.birthday)
                 ? "<unset>" : profile.birthday.Trim());
-            snapshot.Append(", memories=").Append(profile.memory.Count).AppendLine();
+            snapshot.Append(", memories=").Append(profile.memory.Count)
+                .Append(", social memories=").Append(profile.socialMemory.Count).AppendLine();
             int start = Mathf.Max(0, profile.memory.Count - Mathf.Max(1, memoryLines));
             for (int i = start; i < profile.memory.Count; i++)
                 snapshot.Append("  - ").Append(profile.memory[i]).AppendLine();
+            int socialStart = Mathf.Max(0, profile.socialMemory.Count - Mathf.Max(1, memoryLines));
+            for (int i = socialStart; i < profile.socialMemory.Count; i++)
+                snapshot.Append("  - [social] ").Append(FormatSocialMemory(profile.socialMemory[i]))
+                    .AppendLine();
         }
 
         Debug.Log(snapshot.ToString(), this);
@@ -320,6 +357,48 @@ public class LLMBrainService : MonoBehaviour
     private void AddTestSeriousEvent()
     {
         RememberWorldEvent("A serious production incident happened today, and the office is treating it carefully.");
+        LogMemorySnapshot();
+    }
+
+    [ContextMenu("Debug/Add Test Social Memory")]
+    private void AddTestSocialMemory()
+    {
+        List<AgentProfile> available = new();
+        foreach (AgentProfile profile in profiles.Values)
+            if (profile != null && !available.Contains(profile))
+                available.Add(profile);
+        if (available.Count < 2)
+        {
+            Debug.LogWarning("Social memory test needs at least two registered agents in Play Mode.", this);
+            return;
+        }
+
+        AgentProfile first = available[0];
+        AgentProfile second = available[1];
+        List<ConversationParticipantContext> participants = new()
+        {
+            new ConversationParticipantContext
+            {
+                agentId = first.agentId,
+                displayName = DisplayName(first, first.agentId)
+            },
+            new ConversationParticipantContext
+            {
+                agentId = second.agentId,
+                displayName = DisplayName(second, second.agentId)
+            }
+        };
+        RecordSocialEvents(participants, new List<SocialMemoryEntry>
+        {
+            new SocialMemoryEntry
+            {
+                type = "invitation",
+                sourceAgent = participants[0].displayName,
+                targetAgent = participants[1].displayName,
+                subject = "Meet for coffee near the lounge after this task.",
+                status = "open"
+            }
+        });
         LogMemorySnapshot();
     }
 
@@ -384,6 +463,7 @@ public class LLMBrainService : MonoBehaviour
                 context.AppendLine();
             }
             AppendRecentMemory(context, profile, Mathf.Max(2, memoryLines));
+            AppendSocialMemory(context, profile, Mathf.Max(2, memoryLines));
             AppendWorldEvents(context, 3);
             AppendRecentList(context, "Subjects you recently discussed; choose something different:",
                 profile.recentTopics, 6);
@@ -397,7 +477,8 @@ public class LLMBrainService : MonoBehaviour
                     profile.personality + " Choose a coworker and a specific subject this person would genuinely bring up now. " +
                     "Ground it in a personal interest, an established memory, that relationship, or a recent shared event. " +
                     "Do not use vague invitations, generic check-ins, motivational language, or a recently used subject. " +
-                    "The opening must sound spoken, be 5 to 22 words, and give the other person something concrete to answer. " +
+                    "Use simple everyday English. The opening must be one sentence of 4 to 12 words and give the other person something concrete to answer. " +
+                    "Express only one idea. Avoid metaphors, abstract advice, corporate language, semicolons, and long explanations. " +
                     "Do not invent a past event as fact. Respond only as JSON: " +
                     "{\"targetAgent\":string,\"topic\":string,\"openingLine\":string}. " +
                     "Use each key exactly once. If the opening uses a name, it must be the target's name, never your own. " +
@@ -449,13 +530,22 @@ public class LLMBrainService : MonoBehaviour
         int requestedCount)
     {
         AgentProfile profile = GetProfile(agentId);
-        if (backend == null || profile == null || availableActions == null || availableActions.Count == 0)
+        if (profile == null || availableActions == null || availableActions.Count == 0)
             return null;
 
         requestedCount = Mathf.Clamp(requestedCount, 2, 6);
+        OfficeActivityPlan commitmentPlan = BuildOpenCommitmentPlan(
+            profile, availableActions, coworkers);
+        if (commitmentPlan != null
+            && (ContainsIgnoreCase(commitmentPlan.socialMemorySubject, "coffee")
+                || ContainsIgnoreCase(commitmentPlan.socialMemorySubject, "drink")))
+            return SinglePlan(commitmentPlan);
+
+        if (backend == null)
+            return SinglePlan(commitmentPlan);
 
         if (socialRequestGate.CurrentCount == 0 || pendingConversationScripts > 0)
-            return null;
+            return SinglePlan(commitmentPlan);
 
         await socialRequestGate.WaitAsync();
         try
@@ -467,6 +557,7 @@ public class LLMBrainService : MonoBehaviour
             if (!string.IsNullOrWhiteSpace(currentState))
                 context.Append("Current state: ").Append(currentState.Trim()).AppendLine();
             AppendRecentMemory(context, profile, Mathf.Max(2, memoryLines));
+            AppendSocialMemory(context, profile, Mathf.Max(2, memoryLines));
             AppendWorldEvents(context, 3);
 
             List<ChatMessage> messages = new()
@@ -474,20 +565,30 @@ public class LLMBrainService : MonoBehaviour
                 new ChatMessage("system",
                     "Plan the next " + requestedCount + " believable physical office activities for a simulation worker. You are " + who + ". " +
                     profile.personality + " Create a short, varied sequence that fits their needs, personality, and recent context. " +
+                    "When practical, honor an unresolved promise, favor, invitation, or plan from social memory. " +
                     "Do not repeat the same action consecutively or fill the sequence with desk work. " +
                     "ActionPoint means an exact object such as a desk, printer, or coffee machine. " +
                     "FreePosition means a reachable place in the office. CurrentPosition means no travel. " +
                     "FollowAgent means approach the named coworker's live position; use it only for ApproachColleague. " +
-                    "Do not invent unavailable actions. Respond only as JSON with exactly one activities array: " +
+                    "You may use Custom as actionType to invent a new custom action not tied to any scene object; set customActionLabel to a short description (e.g., \"stretch arms\", \"look out window\"). " +
+                    "Custom actions cannot create, fetch, carry, give, or transfer objects. Do not plan snacks, food, presents, birthday gifts, or other unavailable items. " +
+                    "Custom actions use FreePosition or CurrentPosition as destinationMode. " +
+                    "Optionally set energyChange, focusChange, socialChange, productivityChange (negative to decrease, positive to increase, default 0) to describe need effects. " +
+                    "If an activity physically fulfills one open social-memory commitment, copy that memory's subject exactly into socialMemorySubject; otherwise use an empty string. " +
+                    "For an invitation, choose BreakSpot or ChatSpot, target the invited coworker, and write a specific in-character socialOpeningLine that refers naturally to the remembered plan. " +
+                    "socialOpeningLine must use simple everyday English and contain one sentence of 4 to 12 words with one clear idea. " +
+                    "Respond only as JSON with exactly one activities array: " +
                     "{\"activities\":[{\"actionType\":string,\"destinationMode\":string,\"destinationHint\":string," +
-                    "\"targetAgent\":string,\"durationSeconds\":number,\"reason\":string,\"thought\":string}" +
+                    "\"targetAgent\":string,\"durationSeconds\":number,\"reason\":string,\"thought\":string," +
+                    "\"customActionLabel\":string,\"energyChange\":number,\"focusChange\":number,\"socialChange\":number,\"productivityChange\":number,\"socialMemorySubject\":string,\"socialOpeningLine\":string}" +
                     "]}. Return exactly " + requestedCount + " activity objects. " +
-                    "actionType must be exactly one of: " + allowed + ". " +
+                    "actionType must be one of: " + allowed + ", or Custom. " +
                     "destinationMode must be ActionPoint, FreePosition, CurrentPosition, or FollowAgent. " +
                     "For a free destination, destinationHint can be General, Quiet, Lounge, WorkArea, or Corridor. " +
                     (string.IsNullOrWhiteSpace(coworkerNames)
                         ? "No coworkers are currently available, so do not choose ApproachColleague. "
                         : "For ApproachColleague, targetAgent must be exactly one of: " + coworkerNames + ". ") +
+                    "Use ApproachColleague when asking that coworker for advice, help, or a discussion. For ApproachColleague, thought must be the exact short sentence spoken on arrival, not an internal thought. " +
                     "durationSeconds must be between 2 and 30. " +
                     "reason is 3 to 14 words. thought is an optional short in-character thought, 0 to 12 words."),
                 new ChatMessage("user", context.ToString())
@@ -497,16 +598,28 @@ public class LLMBrainService : MonoBehaviour
             {
                 requestLabel = "ActivityBatch:" + who,
                 temperature = Mathf.Clamp(temperature, 0.55f, 0.8f),
-                maxTokens = Mathf.Clamp(requestedCount * 110, 220, 600),
+                maxTokens = Mathf.Clamp(requestedCount * 150, 300, 800),
                 jsonMode = true,
                 structuredSchema = LLMJsonSchema.ActivityPlan,
                 timeoutSeconds = Mathf.Min(requestTimeoutSeconds,
                     Mathf.Max(8, activityPlanTimeoutSeconds)),
-                maxRetries = 0
+                maxRetries = 2,
+                retryBaseDelaySeconds = 5f
             };
             string raw = await backend.CompleteAsync(messages, options);
             List<OfficeActivityPlan> plans = ParseActivityPlans(
-                raw, availableActions, coworkers, requestedCount);
+                raw, availableActions, coworkers, requestedCount, profile);
+            plans = PrependCommitment(plans, commitmentPlan, requestedCount);
+            if (commitmentPlan != null && plans != null && plans.Count > 0)
+            {
+                OfficeActivityPlan selectedCommitment = plans[0];
+                bool modelSelected = !ReferenceEquals(selectedCommitment, commitmentPlan);
+                Debug.Log("[Social commitment plan] " + who + ": " +
+                    (modelSelected ? "model chose " : "fallback chose ") +
+                    selectedCommitment.actionType +
+                    (string.IsNullOrWhiteSpace(selectedCommitment.targetAgent)
+                        ? "" : " with " + selectedCommitment.targetAgent), this);
+            }
             if ((plans == null || plans.Count == 0) && !string.IsNullOrWhiteSpace(raw))
                 Debug.LogWarning("[Activity batch rejected] " + who +
                     ": no valid available activities", this);
@@ -519,7 +632,7 @@ public class LLMBrainService : MonoBehaviour
         {
             Debug.LogWarning(nameof(LLMBrainService) + " activity planning failed for " +
                 agentId + ": " + exception.Message, this);
-            return null;
+            return SinglePlan(commitmentPlan);
         }
         finally
         {
@@ -527,7 +640,150 @@ public class LLMBrainService : MonoBehaviour
         }
     }
 
-    public async Task<List<ConversationTurn>> GenerateConversationAsync(
+    private static List<OfficeActivityPlan> SinglePlan(OfficeActivityPlan plan)
+    {
+        return plan == null ? null : new List<OfficeActivityPlan> { plan };
+    }
+
+    private static List<OfficeActivityPlan> PrependCommitment(List<OfficeActivityPlan> plans,
+        OfficeActivityPlan commitment, int capacity)
+    {
+        if (commitment == null)
+            return plans;
+        plans ??= new List<OfficeActivityPlan>();
+        for (int i = 0; i < plans.Count; i++)
+        {
+            if (plans[i] == null || string.IsNullOrWhiteSpace(plans[i].socialMemorySubject))
+                continue;
+            OfficeActivityPlan generatedCommitment = plans[i];
+            plans.RemoveAt(i);
+            plans.Insert(0, generatedCommitment);
+            while (plans.Count > Mathf.Max(1, capacity))
+                plans.RemoveAt(plans.Count - 1);
+            return plans;
+        }
+        plans.Insert(0, commitment);
+        while (plans.Count > Mathf.Max(1, capacity))
+            plans.RemoveAt(plans.Count - 1);
+        return plans;
+    }
+
+    private static OfficeActivityPlan BuildOpenCommitmentPlan(AgentProfile profile,
+        List<OfficeActionType> availableActions, List<ConversationParticipantContext> coworkers)
+    {
+        string actor = DisplayName(profile, profile.agentId);
+        for (int i = profile.socialMemory.Count - 1; i >= 0; i--)
+        {
+            SocialMemoryEntry entry = profile.socialMemory[i];
+            if (entry == null || entry.status != "open")
+                continue;
+
+            bool actorResponsible = string.Equals(entry.sourceAgent, actor,
+                StringComparison.OrdinalIgnoreCase);
+            if (entry.type == "favor_request" && !string.IsNullOrWhiteSpace(entry.targetAgent))
+                actorResponsible = string.Equals(entry.targetAgent, actor,
+                    StringComparison.OrdinalIgnoreCase);
+            if (!actorResponsible)
+                continue;
+
+            if (entry.type == "invitation")
+            {
+                ConversationParticipantContext target = FindParticipant(coworkers, entry.targetAgent);
+                if (target == null)
+                    continue;
+                OfficeActionType? socialType = availableActions.Contains(OfficeActionType.BreakSpot)
+                    ? OfficeActionType.BreakSpot
+                    : availableActions.Contains(OfficeActionType.ChatSpot)
+                        ? OfficeActionType.ChatSpot : null;
+                if (!socialType.HasValue)
+                    continue;
+                return new OfficeActivityPlan
+                {
+                    actionType = socialType.Value,
+                    destinationMode = OfficeDestinationMode.ActionPoint,
+                    targetAgent = target.displayName,
+                    durationSeconds = 8f,
+                    reason = "follow through on the invitation",
+                    thought = "I should keep that invitation.",
+                    socialMemorySubject = entry.subject,
+                    completesSocialCommitment = true
+                };
+            }
+
+            if (entry.type == "promise" || entry.type == "favor_request" || entry.type == "plan")
+            {
+                bool coffeeDelivery = ContainsIgnoreCase(entry.subject, "coffee")
+                    || ContainsIgnoreCase(entry.subject, "drink");
+                if (coffeeDelivery)
+                {
+                    ConversationParticipantContext target = FindParticipant(coworkers, entry.targetAgent);
+                    if (target == null)
+                        continue;
+                    AIWorkerAgent actorAgent = FindLiveAgent(actor);
+                    if (actorAgent != null && actorAgent.IsHolding)
+                    {
+                        return new OfficeActivityPlan
+                        {
+                            actionType = OfficeActionType.ApproachColleague,
+                            destinationMode = OfficeDestinationMode.FollowAgent,
+                            targetAgent = target.displayName,
+                            durationSeconds = 2f,
+                            reason = "deliver the promised coffee",
+                            thought = "I should deliver this coffee.",
+                            socialMemorySubject = entry.subject,
+                            completesSocialCommitment = true
+                        };
+                    }
+                    if (!availableActions.Contains(OfficeActionType.CoffeeMachine))
+                        continue;
+                    return new OfficeActivityPlan
+                    {
+                        actionType = OfficeActionType.CoffeeMachine,
+                        destinationMode = OfficeDestinationMode.ActionPoint,
+                        durationSeconds = 3f,
+                        reason = "get the promised coffee",
+                        thought = "I promised to bring coffee.",
+                        socialMemorySubject = entry.subject,
+                        completesSocialCommitment = false
+                    };
+                }
+                if (ContainsUnavailableObjectClaim(entry.subject))
+                    continue;
+                string counterpartName = string.Equals(entry.sourceAgent, actor,
+                        StringComparison.OrdinalIgnoreCase)
+                    ? entry.targetAgent : entry.sourceAgent;
+                ConversationParticipantContext counterpart = FindParticipant(coworkers, counterpartName);
+                if (counterpart == null || !availableActions.Contains(OfficeActionType.ApproachColleague))
+                    continue;
+                return new OfficeActivityPlan
+                {
+                    actionType = OfficeActionType.ApproachColleague,
+                    destinationMode = OfficeDestinationMode.FollowAgent,
+                    targetAgent = counterpart.displayName,
+                    durationSeconds = 5f,
+                    reason = entry.subject,
+                    thought = counterpart.displayName + ", can we handle what we discussed?",
+                    socialChange = 2f,
+                    socialMemorySubject = entry.subject,
+                    completesSocialCommitment = true
+                };
+            }
+        }
+        return null;
+    }
+
+    private static AIWorkerAgent FindLiveAgent(string displayName)
+    {
+        if (string.IsNullOrWhiteSpace(displayName))
+            return null;
+        foreach (AIWorkerAgent agent in FindObjectsByType<AIWorkerAgent>(FindObjectsSortMode.None))
+            if (agent != null && string.Equals(agent.DisplayName, displayName,
+                    StringComparison.OrdinalIgnoreCase))
+                return agent;
+        return null;
+    }
+
+    public async Task<ConversationScript> GenerateConversationAsync(
         List<ConversationParticipantContext> participants,
         string openingSpeaker,
         string openingLine,
@@ -558,6 +814,7 @@ public class LLMBrainService : MonoBehaviour
                 if (profile != null)
                 {
                     AppendRecentMemory(cast, profile, 1, participant.displayName);
+                    AppendSocialMemory(cast, profile, 2, participant.displayName);
                     AppendRecentList(cast, participant.displayName +
                         "'s recent phrases; do not repeat them:",
                         profile.recentUtterances, 2);
@@ -584,12 +841,21 @@ public class LLMBrainService : MonoBehaviour
                     "character. Each line must directly react to what came before, remain on the established subject, and " +
                     "sound distinctively like that character. Use at least one specific profile detail, interest, relationship, " +
                     "memory, job detail, or speech-style cue across the replies; avoid reusable workplace filler. " +
-                    "Use casual spoken language and contractions. Let people answer, " +
+                    "Use simple everyday spoken English and contractions. Let people answer, " +
                     "add a concrete detail, tease, hesitate, or disagree when appropriate; they must not merely praise or agree. " +
-                    "Every reply value must be non-empty and use 4 to 20 words. Do not invent shared history, switch roles, narrate actions, use speaker labels " +
+                    "Each line must express one clear idea in one sentence. Prefer common words a child or new English learner can understand. " +
+                    "Avoid metaphors, abstract advice, corporate language, semicolons, and long explanations. " +
+                    "When it fits naturally, one person may invite someone, ask for help, make a promise, or share a confidence; do not force this into every conversation. " +
+                    "Characters may offer to bring coffee, because they can physically fetch and deliver it. Do not offer snacks, food, gifts, or other unavailable objects. " +
+                    "Do not claim someone brought, carries, owns, gives, or received an object unless the opening line explicitly establishes that physical object. " +
+                    "A private social memory belongs only to the named character until they choose to say it aloud. " +
+                    "Every reply value must be non-empty and use 3 to 12 words. Do not invent shared history, switch roles, narrate actions, use speaker labels " +
                     "inside a line, mention AI, or repeat wording. Do not end every line with a question. " +
                     "If the opening already congratulated someone, do not repeat the exact phrase happy birthday; add a personal wish, thanks, joke, or gift reaction instead. " +
-                    "Return only JSON with exactly these keys: " + replyKeys + "."),
+                    "Also extract up to two explicit social events stated in the conversation. Allowed event types are secret, gossip, promise, favor_request, favor_done, plan, and invitation. " +
+                    "Do not infer an event from ordinary chat. For each event, speaker and target must be character names, subject must be a short concrete fact or commitment, and private is true only when it was presented as confidential. " +
+                    "Return an empty socialEvents array when there is no explicit event. Return only JSON with these reply keys: " + replyKeys +
+                    ", plus socialEvents:[{type:string,speaker:string,target:string,subject:string,private:bool}]."),
                 new ChatMessage("user",
                     cast + "Conversation fact: " + openingSpeaker + " initiated this subject and said the opening line. " +
                     "Do not transfer " + openingSpeaker + "'s actions or memories to somebody else.\n" +
@@ -601,17 +867,18 @@ public class LLMBrainService : MonoBehaviour
             {
                 requestLabel = "ConversationScript",
                 temperature = Mathf.Clamp(temperature, 0.65f, 0.82f),
-                maxTokens = Mathf.Clamp(48 * speakerOrder.Count, 144, 320),
+                maxTokens = Mathf.Clamp(56 * speakerOrder.Count + 100, 220, 440),
                 jsonMode = true,
                 structuredSchema = LLMJsonSchema.ConversationScript,
                 timeoutSeconds = Mathf.Min(requestTimeoutSeconds, conversationScriptTimeoutSeconds)
             };
             string raw = await backend.CompleteAsync(messages, options);
-            List<ConversationTurn> turns = ParseAndValidateConversationScript(raw, participants,
-                speakerOrder, openingLine, names, out string rejection);
-            if (turns == null && !string.IsNullOrWhiteSpace(raw))
-                Debug.LogWarning("[Conversation script rejected] " + names + ": " + rejection, this);
-            return turns;
+            ConversationScript script = ParseAndValidateConversationScript(raw, participants,
+                speakerOrder, openingSpeaker, openingLine, topic, names, out string rejection);
+            if (!string.IsNullOrWhiteSpace(rejection))
+                Debug.LogWarning("[Conversation script " + (script == null ? "rejected" : "partial")
+                    + "] " + names + ": " + rejection, this);
+            return script;
         }
         catch (Exception exception)
         {
@@ -633,7 +900,8 @@ public class LLMBrainService : MonoBehaviour
     }
 
     public void RecordConversation(List<ConversationParticipantContext> participants,
-        string topic, string openingSpeaker, string openingLine, List<ConversationTurn> turns)
+        string topic, string openingSpeaker, string openingLine, List<ConversationTurn> turns,
+        List<SocialMemoryEntry> socialEvents = null)
     {
         if (participants == null)
             return;
@@ -654,15 +922,144 @@ public class LLMBrainService : MonoBehaviour
         AddRecent(recentGlobalTopics, topic, 12);
         AddRecent(recentGlobalUtterances, openingLine, 24);
 
+        if (turns != null)
+        {
+            foreach (ConversationTurn turn in turns)
+            {
+                ConversationParticipantContext participant = FindParticipant(participants, turn?.speaker);
+                AgentProfile profile = participant != null ? GetProfile(participant.agentId) : null;
+                if (profile != null)
+                    AddRecent(profile.recentUtterances, turn.line, 10);
+                AddRecent(recentGlobalUtterances, turn.line, 24);
+            }
+        }
+
+        socialEvents ??= new List<SocialMemoryEntry>();
+        AddConcreteOfferEvents(participants, openingSpeaker, openingLine, turns, socialEvents);
+        RecordSocialEvents(participants, socialEvents);
+    }
+
+    private static void AddConcreteOfferEvents(List<ConversationParticipantContext> participants,
+        string openingSpeaker, string openingLine, List<ConversationTurn> turns,
+        List<SocialMemoryEntry> socialEvents)
+    {
+        if (socialEvents == null)
+            return;
+        string previousSpeaker = "";
+        AddConcreteOfferEvent(participants, openingSpeaker, openingLine, previousSpeaker, socialEvents);
+        previousSpeaker = openingSpeaker;
         if (turns == null)
             return;
         foreach (ConversationTurn turn in turns)
         {
-            ConversationParticipantContext participant = FindParticipant(participants, turn?.speaker);
-            AgentProfile profile = participant != null ? GetProfile(participant.agentId) : null;
-            if (profile != null)
-                AddRecent(profile.recentUtterances, turn.line, 10);
-            AddRecent(recentGlobalUtterances, turn.line, 24);
+            AddConcreteOfferEvent(participants, turn?.speaker, turn?.line, previousSpeaker, socialEvents);
+            if (turn != null && !string.IsNullOrWhiteSpace(turn.speaker))
+                previousSpeaker = turn.speaker;
+        }
+    }
+
+    private static void AddConcreteOfferEvent(List<ConversationParticipantContext> participants,
+        string speaker, string line, string previousSpeaker, List<SocialMemoryEntry> socialEvents)
+    {
+        bool coffeeOffer = ContainsIgnoreCase(line, "coffee")
+            && ContainsIgnoreCase(line, "you")
+            && (ContainsIgnoreCase(line, "bring") || ContainsIgnoreCase(line, "get")
+                || ContainsIgnoreCase(line, "fetch") || ContainsIgnoreCase(line, "grab"));
+        if (string.IsNullOrWhiteSpace(speaker) || string.IsNullOrWhiteSpace(line) || !coffeeOffer)
+            return;
+        string target = previousSpeaker;
+        foreach (ConversationParticipantContext participant in participants)
+            if (participant != null && !string.Equals(participant.displayName, speaker,
+                    StringComparison.OrdinalIgnoreCase)
+                && ContainsIgnoreCase(line, participant.displayName))
+            {
+                target = participant.displayName;
+                break;
+            }
+        if (string.IsNullOrWhiteSpace(target) || string.Equals(target, speaker,
+                StringComparison.OrdinalIgnoreCase))
+            return;
+        socialEvents.Add(new SocialMemoryEntry
+        {
+            type = "promise",
+            sourceAgent = speaker,
+            targetAgent = target,
+            subject = speaker + " promised to bring coffee to " + target + ".",
+            status = "open"
+        });
+    }
+
+    private void RecordSocialEvents(List<ConversationParticipantContext> participants,
+        List<SocialMemoryEntry> socialEvents)
+    {
+        if (participants == null || socialEvents == null || socialEvents.Count == 0)
+            return;
+
+        foreach (SocialMemoryEntry socialEvent in socialEvents)
+        {
+            if (socialEvent == null)
+                continue;
+            int listenerCount = 0;
+            foreach (ConversationParticipantContext participant in participants)
+            {
+                AgentProfile profile = participant != null ? GetProfile(participant.agentId) : null;
+                if (profile == null || HasSocialMemory(profile, socialEvent))
+                    continue;
+
+                ResolveCompletedFavor(profile, socialEvent);
+                profile.socialMemory.Add(new SocialMemoryEntry
+                {
+                    type = socialEvent.type,
+                    sourceAgent = socialEvent.sourceAgent,
+                    targetAgent = socialEvent.targetAgent,
+                    subject = socialEvent.subject,
+                    isPrivate = socialEvent.isPrivate,
+                    status = socialEvent.status
+                });
+                while (profile.socialMemory.Count > 20)
+                    profile.socialMemory.RemoveAt(0);
+                listenerCount++;
+            }
+            if (listenerCount > 0)
+                Debug.Log("[Social memory] " + FormatSocialMemory(socialEvent) +
+                    " (heard by " + listenerCount + ")", this);
+        }
+    }
+
+    private static bool HasSocialMemory(AgentProfile profile, SocialMemoryEntry candidate)
+    {
+        int start = Mathf.Max(0, profile.socialMemory.Count - 8);
+        for (int i = start; i < profile.socialMemory.Count; i++)
+        {
+            SocialMemoryEntry previous = profile.socialMemory[i];
+            if (previous != null
+                && string.Equals(previous.type, candidate.type, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(previous.sourceAgent, candidate.sourceAgent, StringComparison.OrdinalIgnoreCase)
+                && TextSimilarity(previous.subject, candidate.subject) >= 0.75f)
+                return true;
+        }
+        return false;
+    }
+
+    private static void ResolveCompletedFavor(AgentProfile profile, SocialMemoryEntry completed)
+    {
+        if (!string.Equals(completed.type, "favor_done", StringComparison.OrdinalIgnoreCase))
+            return;
+        for (int i = profile.socialMemory.Count - 1; i >= 0; i--)
+        {
+            SocialMemoryEntry previous = profile.socialMemory[i];
+            if (previous == null || previous.status != "open"
+                || !string.Equals(previous.type, "favor_request", StringComparison.OrdinalIgnoreCase))
+                continue;
+            bool samePeople = string.Equals(previous.sourceAgent, completed.targetAgent,
+                    StringComparison.OrdinalIgnoreCase)
+                || string.Equals(previous.targetAgent, completed.sourceAgent,
+                    StringComparison.OrdinalIgnoreCase);
+            if (samePeople && TextSimilarity(previous.subject, completed.subject) >= 0.25f)
+            {
+                previous.status = "completed";
+                return;
+            }
         }
     }
 
@@ -677,6 +1074,30 @@ public class LLMBrainService : MonoBehaviour
         int start = Mathf.Max(0, profile.memory.Count - Mathf.Max(1, maxLines));
         for (int i = start; i < profile.memory.Count; i++)
             target.Append("- ").Append(profile.memory[i]).AppendLine();
+    }
+
+    private static void AppendSocialMemory(StringBuilder target, AgentProfile profile, int maxLines,
+        string ownerName = null)
+    {
+        if (profile == null || profile.socialMemory.Count == 0)
+            return;
+        target.AppendLine(string.IsNullOrWhiteSpace(ownerName)
+            ? "Your social knowledge and commitments:"
+            : ownerName.Trim() + "'s social knowledge and commitments:");
+        int start = Mathf.Max(0, profile.socialMemory.Count - Mathf.Max(1, maxLines));
+        for (int i = start; i < profile.socialMemory.Count; i++)
+            target.Append("- ").Append(FormatSocialMemory(profile.socialMemory[i])).AppendLine();
+    }
+
+    private static string FormatSocialMemory(SocialMemoryEntry entry)
+    {
+        if (entry == null)
+            return "<invalid>";
+        string privacy = entry.isPrivate ? "private, " : "";
+        string target = string.IsNullOrWhiteSpace(entry.targetAgent)
+            ? "" : " -> " + entry.targetAgent.Trim();
+        return "[" + privacy + entry.type + ", " + entry.status + "] " +
+            entry.sourceAgent + target + ": " + entry.subject;
     }
 
     private void AppendWorldEvents(StringBuilder target, int maxLines = 4)
@@ -738,7 +1159,8 @@ public class LLMBrainService : MonoBehaviour
         string raw,
         List<OfficeActionType> availableActions,
         List<ConversationParticipantContext> coworkers,
-        int maxPlans)
+        int maxPlans,
+        AgentProfile profile)
     {
         if (CountOccurrences(raw, "\"activities\"") != 1)
             return null;
@@ -757,7 +1179,7 @@ public class LLMBrainService : MonoBehaviour
             for (int i = 0; i < count; i++)
             {
                 OfficeActivityPlan plan = ParseActivityPlanItem(
-                    batch.activities[i], availableActions, coworkers);
+                    batch.activities[i], availableActions, coworkers, profile);
                 if (plan == null || previousType == plan.actionType)
                     continue;
 
@@ -775,22 +1197,81 @@ public class LLMBrainService : MonoBehaviour
     private OfficeActivityPlan ParseActivityPlanItem(
         ActivityPlanDTO dto,
         List<OfficeActionType> availableActions,
-        List<ConversationParticipantContext> coworkers)
+        List<ConversationParticipantContext> coworkers,
+        AgentProfile profile)
     {
-        if (dto == null || string.IsNullOrWhiteSpace(dto.actionType)
-            || !Enum.TryParse(dto.actionType.Trim(), true, out OfficeActionType actionType)
-            || availableActions == null || !availableActions.Contains(actionType))
+        if (dto == null || string.IsNullOrWhiteSpace(dto.actionType))
             return null;
-        if (string.IsNullOrWhiteSpace(dto.destinationMode)
-            || !Enum.TryParse(dto.destinationMode.Trim(), true,
-                out OfficeDestinationMode destinationMode))
-            return null;
+
+        OfficeActionType actionType;
+        bool isCustom = string.Equals(dto.actionType.Trim(), "Custom", StringComparison.OrdinalIgnoreCase);
+        if (!isCustom)
+        {
+            if (!Enum.TryParse(dto.actionType.Trim(), true, out actionType)
+                || availableActions == null || !availableActions.Contains(actionType))
+                return null;
+        }
+        else
+        {
+            actionType = OfficeActionType.Custom;
+            string customDescription = (dto.customActionLabel ?? "") + " "
+                + (dto.reason ?? "") + " " + (dto.thought ?? "");
+            if (ContainsUnavailableObjectClaim(customDescription))
+            {
+                Debug.LogWarning("[Activity rejected] " + DisplayName(profile, profile.agentId)
+                    + ": unavailable object action: " + customDescription.Trim(), this);
+                return null;
+            }
+        }
+
+        OfficeDestinationMode destinationMode;
+        if (isCustom)
+        {
+            destinationMode = !string.IsNullOrWhiteSpace(dto.destinationMode)
+                && Enum.TryParse(dto.destinationMode.Trim(), true, out OfficeDestinationMode parsedMode)
+                ? parsedMode
+                : OfficeDestinationMode.FreePosition;
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(dto.destinationMode)
+                || !Enum.TryParse(dto.destinationMode.Trim(), true, out destinationMode))
+                return null;
+        }
 
         string targetAgent = CleanShortText(dto.targetAgent, 6);
         bool requiresCoworker = destinationMode == OfficeDestinationMode.FollowAgent
             || actionType == OfficeActionType.ApproachColleague;
         if (requiresCoworker && FindParticipant(coworkers, targetAgent) == null)
             return null;
+
+        SocialMemoryEntry commitment = FindOpenSocialMemory(profile, dto.socialMemorySubject);
+        bool socialAction = actionType == OfficeActionType.BreakSpot
+            || actionType == OfficeActionType.ChatSpot;
+        if (commitment != null && commitment.type == "invitation"
+            && (!socialAction || destinationMode != OfficeDestinationMode.ActionPoint
+                || !string.Equals(targetAgent, commitment.targetAgent,
+                    StringComparison.OrdinalIgnoreCase)))
+            commitment = null;
+        if (commitment != null && commitment.type != "invitation")
+        {
+            string actor = DisplayName(profile, profile.agentId);
+            string counterpartName = string.Equals(commitment.sourceAgent, actor,
+                    StringComparison.OrdinalIgnoreCase)
+                ? commitment.targetAgent : commitment.sourceAgent;
+            bool validInteraction = !ContainsUnavailableObjectClaim(commitment.subject)
+                && actionType == OfficeActionType.ApproachColleague
+                && destinationMode == OfficeDestinationMode.FollowAgent
+                && string.Equals(targetAgent, counterpartName,
+                    StringComparison.OrdinalIgnoreCase);
+            if (!validInteraction)
+            {
+                Debug.LogWarning("[Commitment action rejected] "
+                    + DisplayName(profile, profile.agentId) + ": action did not physically fulfill: "
+                    + commitment.subject, this);
+                commitment = null;
+            }
+        }
 
         return new OfficeActivityPlan
         {
@@ -800,8 +1281,65 @@ public class LLMBrainService : MonoBehaviour
             targetAgent = targetAgent,
             durationSeconds = Mathf.Clamp(dto.durationSeconds <= 0f ? 5f : dto.durationSeconds, 2f, 30f),
             reason = CleanShortText(dto.reason, 14),
-            thought = CleanShortText(dto.thought, 12)
+            thought = CleanShortText(dto.thought, 12),
+            customActionLabel = CleanShortText(dto.customActionLabel, 24),
+            energyChange = dto.energyChange,
+            focusChange = dto.focusChange,
+            socialChange = dto.socialChange,
+            productivityChange = dto.productivityChange,
+            socialMemorySubject = commitment != null ? commitment.subject : "",
+            completesSocialCommitment = commitment != null,
+            socialOpeningLine = commitment != null && socialAction
+                ? CleanShortText(dto.socialOpeningLine, 20) : ""
         };
+    }
+
+    private static SocialMemoryEntry FindOpenSocialMemory(AgentProfile profile, string candidate)
+    {
+        if (profile == null || string.IsNullOrWhiteSpace(candidate))
+            return null;
+        for (int i = profile.socialMemory.Count - 1; i >= 0; i--)
+        {
+            SocialMemoryEntry entry = profile.socialMemory[i];
+            if (entry != null && entry.status == "open"
+                && TextSimilarity(entry.subject, candidate) >= 0.7f)
+                return entry;
+        }
+        return null;
+    }
+
+    public void CompleteSocialCommitment(string agentId, string subject)
+    {
+        AgentProfile profile = GetProfile(agentId);
+        if (profile == null || string.IsNullOrWhiteSpace(subject))
+            return;
+
+        SocialMemoryEntry completed = null;
+        foreach (SocialMemoryEntry entry in profile.socialMemory)
+        {
+            if (entry == null || entry.status != "open"
+                || TextSimilarity(entry.subject, subject) < 0.7f)
+                continue;
+            completed = entry;
+            break;
+        }
+        if (completed == null)
+            return;
+
+        HashSet<AgentProfile> uniqueProfiles = new();
+        foreach (AgentProfile candidateProfile in profiles.Values)
+            if (candidateProfile != null)
+                uniqueProfiles.Add(candidateProfile);
+        foreach (AgentProfile candidateProfile in uniqueProfiles)
+            foreach (SocialMemoryEntry entry in candidateProfile.socialMemory)
+                if (entry != null && entry.status == "open"
+                    && string.Equals(entry.sourceAgent, completed.sourceAgent,
+                        StringComparison.OrdinalIgnoreCase)
+                    && TextSimilarity(entry.subject, completed.subject) >= 0.7f)
+                    entry.status = "completed";
+
+        Debug.Log("[Social memory completed] " + DisplayName(profile, agentId) + ": " +
+            FormatSocialMemory(completed), this);
     }
 
     private ConversationPlan ParseConversationPlan(string raw)
@@ -875,9 +1413,10 @@ public class LLMBrainService : MonoBehaviour
         return null;
     }
 
-    private List<ConversationTurn> ParseAndValidateConversationScript(string raw,
+    private ConversationScript ParseAndValidateConversationScript(string raw,
         List<ConversationParticipantContext> participants, List<string> speakerOrder,
-        string openingLine, string participantNames, out string rejection)
+        string openingSpeaker, string openingLine, string topic, string participantNames,
+        out string rejection)
     {
         rejection = null;
         string json = ExtractJson(raw);
@@ -926,18 +1465,36 @@ public class LLMBrainService : MonoBehaviour
             if (string.IsNullOrWhiteSpace(line))
             {
                 rejection = "turn " + (i + 1) + " was unusable: " + lineRejection;
-                return accepted.Count > 0 ? accepted : null;
+                return accepted.Count > 0
+                    ? BuildConversationScript(accepted, null, participants,
+                        openingSpeaker, openingLine)
+                    : null;
             }
             if (IsSimilarToAny(line, lines, 0.8f)
                 || (profile != null && IsSimilarToAny(line, profile.recentUtterances, 0.78f)))
             {
                 rejection = "turn " + (i + 1) + " repeated a recent line";
-                return accepted.Count > 0 ? accepted : null;
+                return accepted.Count > 0
+                    ? BuildConversationScript(accepted, null, participants,
+                        openingSpeaker, openingLine)
+                    : null;
             }
             if (IsSimilarToAny(line, recentGlobalUtterances, 0.82f))
             {
                 rejection = "turn " + (i + 1) + " repeated a line recently heard elsewhere";
-                return accepted.Count > 0 ? accepted : null;
+                return accepted.Count > 0
+                    ? BuildConversationScript(accepted, null, participants,
+                        openingSpeaker, openingLine)
+                    : null;
+            }
+            string continuityContext = topic + " " + openingLine + " " + string.Join(" ", lines);
+            if (!HasConversationContinuity(line, continuityContext))
+            {
+                rejection = "turn " + (i + 1) + " changed to an unrelated subject";
+                return accepted.Count > 0
+                    ? BuildConversationScript(accepted, null, participants,
+                        openingSpeaker, openingLine)
+                    : null;
             }
 
             accepted.Add(new ConversationTurn { speaker = expectedSpeaker, line = line });
@@ -949,7 +1506,97 @@ public class LLMBrainService : MonoBehaviour
             rejection = "script had no valid turns";
             return null;
         }
-        return accepted;
+        return BuildConversationScript(accepted, script.socialEvents, participants,
+            openingSpeaker, openingLine);
+    }
+
+    private static ConversationScript BuildConversationScript(List<ConversationTurn> turns,
+        SocialEventDTO[] rawEvents, List<ConversationParticipantContext> participants,
+        string openingSpeaker, string openingLine)
+    {
+        ConversationScript result = new();
+        result.turns.AddRange(turns);
+        if (rawEvents == null || rawEvents.Length == 0)
+            return result;
+
+        StringBuilder transcript = new();
+        transcript.Append(openingSpeaker).Append(": ").Append(openingLine).Append(' ');
+        foreach (ConversationTurn turn in turns)
+            transcript.Append(turn.speaker).Append(": ").Append(turn.line).Append(' ');
+
+        int count = Mathf.Min(2, rawEvents.Length);
+        for (int i = 0; i < count; i++)
+        {
+            SocialMemoryEntry socialEvent = ValidateSocialEvent(rawEvents[i], participants,
+                transcript.ToString());
+            if (socialEvent != null)
+                result.socialEvents.Add(socialEvent);
+        }
+        return result;
+    }
+
+    private static SocialMemoryEntry ValidateSocialEvent(SocialEventDTO raw,
+        List<ConversationParticipantContext> participants, string transcript)
+    {
+        if (raw == null || string.IsNullOrWhiteSpace(raw.type)
+            || string.IsNullOrWhiteSpace(raw.speaker) || string.IsNullOrWhiteSpace(raw.subject))
+            return null;
+
+        string type = raw.type.Trim().ToLowerInvariant();
+        string[] allowedTypes =
+        {
+            "secret", "gossip", "promise", "favor_request", "favor_done", "plan", "invitation"
+        };
+        if (Array.IndexOf(allowedTypes, type) < 0)
+            return null;
+
+        ConversationParticipantContext source = FindParticipant(participants, raw.speaker);
+        ConversationParticipantContext target = FindParticipant(participants, raw.target);
+        if (source == null || (!string.IsNullOrWhiteSpace(raw.target) && target == null))
+            return null;
+
+        string subject = raw.subject.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        int words = CountWords(subject);
+        if (words < 2 || words > 28 || !HasMeaningfulOverlap(subject, transcript))
+            return null;
+
+        bool remainsOpen = type == "promise" || type == "favor_request"
+            || type == "plan" || type == "invitation";
+        return new SocialMemoryEntry
+        {
+            type = type,
+            sourceAgent = source.displayName,
+            targetAgent = target != null ? target.displayName : "",
+            subject = subject.TrimEnd('.', '!', '?') + ".",
+            isPrivate = raw.@private,
+            status = remainsOpen ? "open" : type == "favor_done" ? "completed" : "noted"
+        };
+    }
+
+    private static bool HasMeaningfulOverlap(string subject, string transcript)
+    {
+        HashSet<string> subjectWords = MeaningfulWords(NormalizeForComparison(subject));
+        HashSet<string> transcriptWords = MeaningfulWords(NormalizeForComparison(transcript));
+        foreach (string word in subjectWords)
+            if (transcriptWords.Contains(word))
+                return true;
+        return false;
+    }
+
+    private static bool HasConversationContinuity(string line, string context)
+    {
+        if (CountWords(line) <= 6 || HasMeaningfulOverlap(line, context))
+            return true;
+        string normalized = NormalizeForComparison(line);
+        string[] directReactions =
+        {
+            "that sounds", "tell me more", "why do you", "i agree", "i disagree",
+            "you are right", "good idea", "bad idea", "what happened next"
+        };
+        foreach (string reaction in directReactions)
+            if (normalized.StartsWith(reaction, StringComparison.Ordinal))
+                return true;
+        return false;
     }
 
     private static string BuildReplyKeyList(int count)
@@ -1049,6 +1696,24 @@ public class LLMBrainService : MonoBehaviour
             index += fragment.Length;
         }
         return count;
+    }
+
+    private static bool ContainsIgnoreCase(string value, string fragment)
+    {
+        return !string.IsNullOrWhiteSpace(value) && !string.IsNullOrWhiteSpace(fragment)
+            && value.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static bool ContainsUnavailableObjectClaim(string value)
+    {
+        string[] unavailable =
+        {
+            "gift", "present", "snack", "food", "cake", "dumpling"
+        };
+        foreach (string word in unavailable)
+            if (ContainsIgnoreCase(value, word))
+                return true;
+        return false;
     }
 
     private static ConversationParticipantContext FindParticipant(
@@ -1560,6 +2225,17 @@ public class LLMBrainService : MonoBehaviour
         public string reply4;
         public string reply5;
         public string reply6;
+        public SocialEventDTO[] socialEvents;
+    }
+
+    [Serializable]
+    private class SocialEventDTO
+    {
+        public string type;
+        public string speaker;
+        public string target;
+        public string subject;
+        public bool @private;
     }
 
     [Serializable]
@@ -1578,5 +2254,12 @@ public class LLMBrainService : MonoBehaviour
         public float durationSeconds;
         public string reason;
         public string thought;
+        public string customActionLabel;
+        public float energyChange;
+        public float focusChange;
+        public float socialChange;
+        public float productivityChange;
+        public string socialMemorySubject;
+        public string socialOpeningLine;
     }
 }

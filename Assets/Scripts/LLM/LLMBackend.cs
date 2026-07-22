@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -83,6 +85,7 @@ public class OpenAICompatibleBackend : ILLMBackend
         };
 
         string json = JsonUtility.ToJson(payload);
+        json = ReplaceTemperatureJson(json, payload.temperature);
         List<string> extraPayloadFields = new();
         if (options.jsonMode)
             extraPayloadFields.Add("\"response_format\":" + BuildResponseFormat(options.structuredSchema));
@@ -124,11 +127,14 @@ public class OpenAICompatibleBackend : ILLMBackend
                     return null;
 
                 bool timedOut = IsRequestTimeout(responseCode, requestError);
+                bool serviceOverloaded = IsServiceOverloaded(responseCode, responseBody);
                 bool retryable = !timedOut && IsRetryable(responseCode, result);
                 if (retryable && attempt + 1 < maxAttempts)
                 {
                     float delaySeconds = GetRetryDelaySeconds(
                         retryAfter, options.retryBaseDelaySeconds, attempt);
+                    if (serviceOverloaded)
+                        delaySeconds = Mathf.Max(5f, delaySeconds);
                     cooldownUntilUtc = DateTime.UtcNow.AddSeconds(delaySeconds);
                     if (!await DelayAsync(delaySeconds, options.cancellationToken))
                         return null;
@@ -137,18 +143,23 @@ public class OpenAICompatibleBackend : ILLMBackend
 
                 if (responseCode == 429)
                 {
-                    float cooldownSeconds = Mathf.Max(12f,
+                    float minimumCooldown = serviceOverloaded ? 120f : 30f;
+                    float cooldownSeconds = Mathf.Max(minimumCooldown,
                         GetRetryDelaySeconds(retryAfter, options.retryBaseDelaySeconds, attempt));
                     cooldownUntilUtc = DateTime.UtcNow.AddSeconds(cooldownSeconds);
                 }
                 else if (timedOut)
                     cooldownUntilUtc = DateTime.UtcNow.AddSeconds(30f);
 
-                Debug.LogWarning(logPrefix + nameof(OpenAICompatibleBackend) + " request failed (" +
+                string failureMessage = logPrefix + nameof(OpenAICompatibleBackend) + " request failed (" +
                     responseCode + "): " + requestError +
                     (responseCode == 429 || timedOut
                         ? " Requests will temporarily use local fallback." : "") +
-                    (string.IsNullOrWhiteSpace(responseBody) ? "" : "\n" + responseBody));
+                    (string.IsNullOrWhiteSpace(responseBody) ? "" : "\n" + responseBody);
+                if (serviceOverloaded)
+                    Debug.Log(failureMessage);
+                else
+                    Debug.LogWarning(failureMessage);
                 return null;
             }
 
@@ -194,6 +205,13 @@ public class OpenAICompatibleBackend : ILLMBackend
             && requestError.IndexOf("timeout", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
+    private static bool IsServiceOverloaded(long responseCode, string responseBody)
+    {
+        return responseCode == 429 && !string.IsNullOrWhiteSpace(responseBody)
+            && (responseBody.IndexOf("\"code\":\"1305\"", StringComparison.OrdinalIgnoreCase) >= 0
+                || responseBody.IndexOf("temporarily overloaded", StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
     private static float GetRetryDelaySeconds(string retryAfter, float baseDelaySeconds, int attempt)
     {
         if (int.TryParse(retryAfter, out int retryAfterSeconds) && retryAfterSeconds > 0)
@@ -215,6 +233,16 @@ public class OpenAICompatibleBackend : ILLMBackend
         {
             return false;
         }
+    }
+
+    private static string ReplaceTemperatureJson(string json, float temperature)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return json;
+
+        string formattedTemperature = temperature.ToString("0.00", CultureInfo.InvariantCulture);
+        Regex temperaturePattern = new("\"temperature\"\\s*:\\s*[-0-9.Ee+]+");
+        return temperaturePattern.Replace(json, "\"temperature\":" + formattedTemperature, 1);
     }
 
     private static Task<UnityWebRequest.Result> WebRequestTask(UnityWebRequest req, CancellationToken cancellationToken)

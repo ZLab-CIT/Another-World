@@ -1,5 +1,3 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 [RequireComponent(typeof(OfficeActionPoint))]
@@ -8,48 +6,71 @@ public class CoffeeMachine : MonoBehaviour
     [SerializeField] private Transform coffeeSpawnPoint;
     [SerializeField] private GameObject coffeePrefab;
     [SerializeField] private ObjectSpritesSet coffeeSpritesSet;
+    [SerializeField, Min(0f)] private float spawnLifetime = 15f;
 
-    private OfficeActionPoint coffeeActionPoint;
     private SceneItem lastSpawnedCup;
-
-    public SceneItem LastSpawnedCup => lastSpawnedCup;
 
     // Start is called before the first frame update
     void Start()
     {
         if (coffeeSpawnPoint == null) coffeeSpawnPoint = transform.Find("CoffeeSpawnPoint");
-        coffeeActionPoint = GetComponent<OfficeActionPoint>();
-        coffeeActionPoint.OnActionUsed += SpawnRandomCoffeeCup;
     }
 
     public void SpawnRandomCoffeeCup()
     {
-        if (coffeePrefab == null || coffeeSpawnPoint == null || coffeeSpritesSet == null)
+        if (coffeeSpawnPoint == null || coffeeSpritesSet == null)
         {
             Debug.LogWarning("Coffee prefab or spawn point not set.");
             return;
         }
 
-        GameObject newCupObj = Instantiate(coffeePrefab, coffeeSpawnPoint.position, coffeeSpawnPoint.rotation, coffeeSpawnPoint);
+        if (lastSpawnedCup != null)
+            Destroy(lastSpawnedCup.gameObject);
 
-        SceneItem newCup = newCupObj.GetComponent<SceneItem>();
+        SceneItem newCup = CreateCupInstance();
+        if (newCup == null)
+        {
+            Debug.LogWarning($"{name}: failed to create coffee cup instance.", this);
+            return;
+        }
+
         Sprite randomSprite = coffeeSpritesSet.GetRandomSprite();
         newCup.SetSprite(randomSprite);
+        newCup.ScheduleDestroy(spawnLifetime);
         lastSpawnedCup = newCup;
     }
 
     public SceneItem ConsumeLastCup()
     {
+        if (lastSpawnedCup == null)
+            return null;
+
         SceneItem cup = lastSpawnedCup;
         lastSpawnedCup = null;
+        cup.CancelScheduledDestroy();
         return cup;
     }
 
-    private void OnDestroy()
+    private SceneItem CreateCupInstance()
     {
-        if (coffeeActionPoint != null)
+        GameObject newCupObj;
+        if (coffeePrefab != null)
         {
-            coffeeActionPoint.OnActionUsed -= SpawnRandomCoffeeCup;
+            newCupObj = Instantiate(coffeePrefab, coffeeSpawnPoint.position, coffeeSpawnPoint.rotation, coffeeSpawnPoint);
         }
+        else
+        {
+            newCupObj = new GameObject("CoffeeCup");
+            newCupObj.transform.SetParent(coffeeSpawnPoint, false);
+            newCupObj.transform.localPosition = Vector3.zero;
+            newCupObj.transform.localRotation = Quaternion.identity;
+            newCupObj.transform.localScale = Vector3.one * 0.5f;
+            newCupObj.AddComponent<SpriteRenderer>();
+        }
+
+        SceneItem sceneItem = newCupObj.GetComponent<SceneItem>();
+        if (sceneItem == null)
+            sceneItem = newCupObj.AddComponent<SceneItem>();
+        return sceneItem;
     }
 }

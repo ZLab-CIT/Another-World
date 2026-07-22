@@ -23,6 +23,7 @@ public class AgentPresentation2D : MonoBehaviour
     private Vector3 currentHatSittingOffset;
     private bool lastHatSittingState;
     private GameObject heldItem;
+    private SpriteRenderer heldItemRenderer;
     private float heldItemExpiry;
     private SortingGroup sortingGroup;
 
@@ -74,12 +75,7 @@ public class AgentPresentation2D : MonoBehaviour
         sortingGroup.sortingLayerName = "Default";
 
         if (handAnchor == null)
-        {
-            Transform visualRoot = animator != null ? animator.transform : transform;
-            handAnchor = new GameObject("HandAnchor").transform;
-            handAnchor.SetParent(visualRoot, false);
-            handAnchor.localPosition = new Vector3(0.3f, -0.15f, 0f);
-        }
+            handAnchor = GetComponentInChildren<Transform>();
     }
 
     public void UpdateState(Vector2 velocity, bool isSitting)
@@ -102,10 +98,7 @@ public class AgentPresentation2D : MonoBehaviour
         }
 
         UpdateHatPlacement(isSitting);
-        // Sitting clips control the SpriteRenderer sorting themselves so the body
-        // can move behind/in front of an external chair. A SortingGroup would make
-        // the whole character atomic and prevent those animation curves from
-        // interacting with the chair renderer.
+        UpdateHeldItemSorting();
         bool automaticSortingEnabled = !isSitting;
         if (sortingGroup.enabled != automaticSortingEnabled)
             sortingGroup.enabled = automaticSortingEnabled;
@@ -163,12 +156,20 @@ public class AgentPresentation2D : MonoBehaviour
         heldItem.transform.localRotation = localRot;
         heldItemExpiry = holdDuration > 0f ? Time.time + holdDuration : 0f;
 
-        if (item.TryGetComponent<SpriteRenderer>(out var sr)) ApplyHeldItemSorting(sr);
+        if (item.TryGetComponent<SpriteRenderer>(out var sr))
+        {
+            heldItemRenderer = sr;
+            ApplyHeldItemSorting(sr);
+        }
+        else
+        {
+            heldItemRenderer = null;
+        }
     }
 
-    public void PlaceHeldItemAt(Transform parent, Vector3 localPosition)
+    public void PlaceHeldItemAt(Transform parent, Vector3 localPosition, float destroyAfter = 0f)
     {
-        if (heldItem == null)
+        if (heldItem == null || parent == null)
             return;
 
         heldItem.transform.SetParent(parent, false);
@@ -181,7 +182,11 @@ public class AgentPresentation2D : MonoBehaviour
             sr.sortingOrder = 15;
         }
 
+        if (heldItem.TryGetComponent<SceneItem>(out var sceneItem))
+            sceneItem.ScheduleDestroy(destroyAfter);
+
         heldItem = null;
+        heldItemRenderer = null;
         heldItemExpiry = 0f;
     }
 
@@ -192,6 +197,21 @@ public class AgentPresentation2D : MonoBehaviour
             Destroy(heldItem);
             heldItem = null;
         }
+
+        heldItemRenderer = null;
+        heldItemExpiry = 0f;
+    }
+
+    public SceneItem ReleaseHeldItem()
+    {
+        if (heldItem == null)
+            return null;
+        GameObject released = heldItem;
+        heldItem = null;
+        heldItemRenderer = null;
+        heldItemExpiry = 0f;
+        released.transform.SetParent(null, true);
+        return released.GetComponent<SceneItem>();
     }
 
     private void ApplyHeldItemSorting(SpriteRenderer sr)
@@ -200,12 +220,20 @@ public class AgentPresentation2D : MonoBehaviour
         if (bodyRenderer != null)
         {
             sr.sortingLayerID = bodyRenderer.sortingLayerID;
-            sr.sortingOrder = bodyRenderer.sortingOrder + 10;
+            sr.sortingOrder = lastFacing.y > 0
+                ? bodyRenderer.sortingOrder - 10
+                : bodyRenderer.sortingOrder + 10;
         }
         else
         {
             sr.sortingOrder = 50;
         }
+    }
+
+    private void UpdateHeldItemSorting()
+    {
+        if (heldItemRenderer != null)
+            ApplyHeldItemSorting(heldItemRenderer);
     }
 
     public void ApplyHat(Sprite hatSprite, Vector3 standingOffset, Vector3 sittingOffset, Vector3 localScale)

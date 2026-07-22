@@ -439,6 +439,20 @@ public class AgentConversationController : MonoBehaviour
         BeginConversation(action, participants, opener, topic, intendedPartner, intent.onOpeningSpoken);
     }
 
+    public bool BeginDirectConversation(AIWorkerAgent target, string openingLine, string topic)
+    {
+        AgentConversationController targetConversation = GetController(target);
+        if (target == null || target == owner || inConversation
+            || targetConversation == null || targetConversation.inConversation
+            || string.IsNullOrWhiteSpace(openingLine))
+            return false;
+
+        BeginConversation(null, new List<AIWorkerAgent> { target }, openingLine,
+            string.IsNullOrWhiteSpace(topic) ? openingLine : topic,
+            target.DisplayName);
+        return true;
+    }
+
     private async void RunConversation(OfficeActionPoint action, List<AIWorkerAgent> participants,
         string openerLine, string topic, string intendedPartnerName, Action onOpeningSpoken)
     {
@@ -452,6 +466,7 @@ public class AgentConversationController : MonoBehaviour
         AgentThoughtBubble groupDialogue = activeGroupDialogue;
         HideAll(speakers);
         List<ConversationTurn> completedTurns = new();
+        List<SocialMemoryEntry> completedSocialEvents = null;
         List<ConversationParticipantContext> contexts = null;
 
         try
@@ -468,12 +483,15 @@ public class AgentConversationController : MonoBehaviour
 
             List<string> speakerOrder = BuildSpeakerOrder(speakers, intendedPartnerName,
                 replyCount, topic, openerLine);
-            Task<List<ConversationTurn>> scriptTask = brain != null && speakerOrder.Count > 0
+            Task<ConversationScript> scriptTask = brain != null && speakerOrder.Count > 0
                 ? brain.GenerateConversationAsync(contexts, owner.DisplayName, openerLine, topic, speakerOrder)
                 : null;
-            List<ConversationTurn> generated = scriptTask != null ? await scriptTask : null;
+            ConversationScript script = scriptTask != null ? await scriptTask : null;
+            List<ConversationTurn> generated = script?.turns;
             if (generated == null)
                 generated = BuildFallbackTurns(speakerOrder, openerLine, topic);
+            else if (generated.Count < speakerOrder.Count)
+                CompletePartialTurns(generated, speakerOrder, owner.DisplayName, topic);
 
             foreach (ConversationTurn turn in generated)
             {
@@ -485,6 +503,7 @@ public class AgentConversationController : MonoBehaviour
                 speaker.ApplyEffects(0f, 0f, 5f, 0f);
                 ExtendAll(speakers, 6f, includeOwner: false);
             }
+            completedSocialEvents = script?.socialEvents;
         }
         catch (Exception exception)
         {
@@ -494,7 +513,8 @@ public class AgentConversationController : MonoBehaviour
         finally
         {
             contexts ??= BuildParticipantContexts(speakers);
-            brain?.RecordConversation(contexts, topic, owner.DisplayName, openerLine, completedTurns);
+            brain?.RecordConversation(contexts, topic, owner.DisplayName, openerLine,
+                completedTurns, completedSocialEvents);
             RememberConversation(brain, speakers, topic);
             StrengthenRelationships(speakers);
             HideAll(speakers);
@@ -618,6 +638,69 @@ public class AgentConversationController : MonoBehaviour
         return turns;
     }
 
+    private static void CompletePartialTurns(List<ConversationTurn> turns,
+        List<string> speakerOrder, string initiatingSpeaker, string topic)
+    {
+        if (turns == null || speakerOrder == null)
+            return;
+        while (turns.Count < speakerOrder.Count)
+        {
+            int index = turns.Count;
+            string speaker = speakerOrder[index];
+            bool initiator = string.Equals(speaker, initiatingSpeaker,
+                StringComparison.OrdinalIgnoreCase);
+            string line = BuildPartialReply(speaker, initiator, index, topic);
+            turns.Add(new ConversationTurn { speaker = speaker, line = line });
+        }
+    }
+
+    private static string BuildPartialReply(string speaker, bool initiator, int index, string topic)
+    {
+        if (IsBirthdayTopic(topic))
+        {
+            bool birthdayPerson = !string.IsNullOrWhiteSpace(speaker)
+                && ContainsIgnoreCase(topic, speaker);
+            if (birthdayPerson && !initiator)
+                return "Thank you. I am glad you came.";
+            return initiator
+                ? "I hope you get time to enjoy today."
+                : "I hope today gives you something fun.";
+        }
+
+        if (ContainsIgnoreCase(topic, "coffee") || ContainsIgnoreCase(topic, "drink"))
+            return initiator
+                ? "I chose one I thought you would like."
+                : "Thank you. I will try it now.";
+
+        if (ContainsIgnoreCase(topic, "advice") || ContainsIgnoreCase(topic, "opinion"))
+            return initiator
+                ? "I am not sure which choice would work best."
+                : "What have you tried so far?";
+
+        if (initiator)
+            return "The hardest part is deciding what to do next.";
+        return index % 2 == 0
+            ? "What makes that important right now?"
+            : "Tell me one part you want to change.";
+    }
+
+    private static string SpokenSubject(string topic)
+    {
+        string subject = string.IsNullOrWhiteSpace(topic) ? "this" : topic.Trim().TrimEnd('.', '!', '?');
+        string[] prefixes =
+        {
+            "ask for advice on ", "ask advice about ", "discuss ", "check ",
+            "talk about ", "get advice on "
+        };
+        foreach (string prefix in prefixes)
+            if (subject.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                subject = subject.Substring(prefix.Length).Trim();
+                break;
+            }
+        return string.IsNullOrWhiteSpace(subject) ? "this" : subject;
+    }
+
     private static List<ConversationTurn> BuildBirthdayFallbackTurns(
         List<string> speakerOrder, string subject, bool hatGift, bool snackGift)
     {
@@ -641,7 +724,6 @@ public class AgentConversationController : MonoBehaviour
             "I am saving the sentimental speech for when nobody can quote me."
         };
 
-        int offset = ConversationTemplateOffset(subject, speakerOrder);
         for (int i = 0; i < speakerOrder.Count; i++)
         {
             if (string.IsNullOrWhiteSpace(speakerOrder[i]))
@@ -649,7 +731,8 @@ public class AgentConversationController : MonoBehaviour
             turns.Add(new ConversationTurn
             {
                 speaker = speakerOrder[i],
-                line = PickFallbackReply(templates, i + offset)
+                // BuildSpeakerOrder puts the birthday person first.
+                line = i == 0 ? giftReaction : PickFallbackReply(templates, i + 2)
             });
         }
 

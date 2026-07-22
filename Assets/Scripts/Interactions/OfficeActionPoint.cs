@@ -16,7 +16,8 @@ public enum OfficeActionType
     WalkAround,
     Think,
     CheckPhone,
-    ApproachColleague
+    ApproachColleague,
+    Custom
 }
 
 public enum OfficeFacingDirection
@@ -39,8 +40,6 @@ public class OfficeActionPoint : MonoBehaviour
     public OfficeActionType actionType;
 
     [Header("Action Settings")]
-    [Tooltip("Optional human-readable label used in LLM prompts and thought bubbles.")]
-    public string actionLabel;
     public float useTime = 3f;
     public float baseScore = 10f;
 
@@ -51,14 +50,15 @@ public class OfficeActionPoint : MonoBehaviour
         new OfficeActionSlot { offset = Vector2.zero, facing = OfficeFacingDirection.Down }
     };
 
+    [Header("Optional Item Placement")]
+    [Tooltip("If assigned, held items will be placed here instead of directly on the action point.")]
+    public Transform itemPlacementPoint;
+
     [Header("Effects After Use")]
     public float energyChange;
     public float focusChange;
     public float socialChange;
     public float productivityChange;
-
-    public delegate void ActionUsedHandler();
-    public event ActionUsedHandler OnActionUsed;
 
     private readonly Dictionary<AIWorkerAgent, int> reservedSlots = new();
 
@@ -122,7 +122,35 @@ public class OfficeActionPoint : MonoBehaviour
     public void ApplyTo(AIWorkerAgent agent)
     {
         agent.ApplyEffects(energyChange, focusChange, socialChange, productivityChange);
-        OnActionUsed?.Invoke();
+    }
+
+    public Transform GetItemPlacementTransform()
+    {
+        if (itemPlacementPoint != null)
+            return itemPlacementPoint;
+
+        Transform childPoint = transform.Find("TablePoint")
+            ?? transform.Find("CoffeePoint")
+            ?? transform.Find("CupPoint")
+            ?? transform.Find("DeskCoffee")
+            ?? transform.Find("ItemPoint");
+
+        if (childPoint != null)
+            return childPoint;
+
+        if (transform.parent != null)
+        {
+            Transform siblingPoint = transform.parent.Find("TablePoint")
+                ?? transform.parent.Find("CoffeePoint")
+                ?? transform.parent.Find("CupPoint")
+                ?? transform.parent.Find("DeskCoffee")
+                ?? transform.parent.Find("ItemPoint");
+
+            if (siblingPoint != null)
+                return siblingPoint;
+        }
+
+        return transform;
     }
 
     private int SlotCount => slots != null && slots.Count > 0 ? slots.Count : 1;

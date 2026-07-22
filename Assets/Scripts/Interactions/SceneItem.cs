@@ -4,6 +4,7 @@ using UnityEngine;
 public class SceneItem : MonoBehaviour
 {
     private SpriteRenderer sr;
+    private Coroutine scheduledDestroyRoutine;
 
     private void Awake()
     {
@@ -18,8 +19,28 @@ public class SceneItem : MonoBehaviour
         }
     }
 
-    public void DestroyItem()
+    public void ScheduleDestroy(float delay)
     {
+        CancelScheduledDestroy();
+        if (delay <= 0f || !isActiveAndEnabled)
+            return;
+
+        scheduledDestroyRoutine = StartCoroutine(DestroyAfterDelay(delay));
+    }
+
+    public void CancelScheduledDestroy()
+    {
+        if (scheduledDestroyRoutine == null)
+            return;
+
+        StopCoroutine(scheduledDestroyRoutine);
+        scheduledDestroyRoutine = null;
+    }
+
+    private System.Collections.IEnumerator DestroyAfterDelay(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        scheduledDestroyRoutine = null;
         Destroy(gameObject);
     }
 }

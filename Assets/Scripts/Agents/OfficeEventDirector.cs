@@ -226,7 +226,7 @@ public class OfficeEventDirector : MonoBehaviour
                 return BirthdayGift.Hat(hat, pool);
         }
 
-        return BirthdayGift.SmallSnack;
+        return BirthdayGift.None;
     }
 
     private void ApplyBirthdayGift(AIWorkerAgent birthdayWorker, BirthdayGift gift)
