@@ -32,7 +32,7 @@ public class VendingEventDispatcher : MonoBehaviour
 
     private static Sprite cachedWhiteSprite;
 
-    private VendingMachineAvatar machineAvatar;
+    private VendingMachine vendingMachine;
     private Sprite[] fallbackDropSprites;
     private readonly VendingEventCatalog catalog = new();
 
@@ -584,28 +584,23 @@ public class VendingEventDispatcher : MonoBehaviour
         }
     }
 
-    private VendingMachineAvatar GetMachineAvatar()
+    private VendingMachine GetVendingMachine()
     {
-        if (machineAvatar != null)
-            return machineAvatar;
+        if (vendingMachine != null)
+            return vendingMachine;
 
-        machineAvatar = FindFirstObjectByType<VendingMachineAvatar>();
-        return machineAvatar;
+        vendingMachine = FindFirstObjectByType<VendingMachine>();
+        return vendingMachine;
     }
 
     private void PlayMachineReaction(VendingBuffEventSO evt, List<AIWorkerAgent> targets)
     {
-        VendingMachineAvatar avatar = GetMachineAvatar();
-        if (avatar == null)
+        VendingMachine machine = GetVendingMachine();
+        if (machine == null || machine.SpawnSnackExternal() == null)
         {
             SpawnDrop(evt, targets);
             return;
         }
-
-        Sprite sprite = PickDropSprite(evt);
-        if (sprite == null)
-            sprite = PickFallbackDropSprite();
-        avatar.React(sprite, Mathf.Max(0.1f, evt.dropLifetime), Mathf.Max(0.01f, evt.dropScale));
 
         if (targets.Count > 0 && targets[0] != null)
             HighlightTransform(targets[0].transform, Mathf.Min(Mathf.Max(1.6f, evt.dropLifetime), 4f));

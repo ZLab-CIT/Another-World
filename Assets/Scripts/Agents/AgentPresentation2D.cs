@@ -16,6 +16,7 @@ public class AgentPresentation2D : MonoBehaviour
     [SerializeField] private bool thoughtBubblesEnabled = true;
     [SerializeField] private AgentThoughtBubble thoughtBubblePrefab;
     [SerializeField] private AgentThoughtBubble thoughtBubble;
+    [SerializeField] private AgentThoughtBubble speechBubble;
 
     private Vector2 lastFacing = Vector2.down;
     private GameObject currentHat;
@@ -134,14 +135,38 @@ public class AgentPresentation2D : MonoBehaviour
             thoughtBubble.Hide();
     }
 
-    public AgentThoughtBubble CreateSharedDialogueBubble(Transform anchor)
+    public void ShowSpeech(string speakerName, string content, Color speakerColor)
     {
-        if (!thoughtBubblesEnabled || thoughtBubblePrefab == null || anchor == null)
-            return null;
+        if (!thoughtBubblesEnabled)
+            return;
 
-        AgentThoughtBubble dialogueBubble = Instantiate(thoughtBubblePrefab, anchor);
-        dialogueBubble.name = anchor.name + " Dialogue";
-        return dialogueBubble;
+        if (speechBubble == null)
+        {
+            if (thoughtBubblePrefab == null)
+            {
+                Debug.LogWarning($"{name}: no bubble prefab is assigned.", this);
+                return;
+            }
+
+            speechBubble = Instantiate(thoughtBubblePrefab, transform);
+            speechBubble.name = "SpeechBubble";
+        }
+
+        speechBubble.ShowDialogue(speakerName, content, speakerColor);
+    }
+
+    public void HideSpeech()
+    {
+        if (speechBubble != null)
+            speechBubble.Hide();
+    }
+
+    public void BeginActionPerformance(OfficeActionType actionType, string customLabel = "")
+    {
+    }
+
+    public void EndActionPerformance()
+    {
     }
 
     public void AttachItemToHand(SceneItem item, Vector3 localOffset = default, Vector3 localScale = default, Quaternion localRot = default, float holdDuration = 0f)
@@ -152,7 +177,7 @@ public class AgentPresentation2D : MonoBehaviour
         heldItem = item.gameObject;
         heldItem.transform.SetParent(handAnchor, false);
         heldItem.transform.localPosition = localOffset;
-        heldItem.transform.localScale = localScale == default ? Vector3.one : localScale;
+        heldItem.transform.localScale = localScale == default ? heldItem.transform.localScale : localScale;
         heldItem.transform.localRotation = localRot;
         heldItemExpiry = holdDuration > 0f ? Time.time + holdDuration : 0f;
 

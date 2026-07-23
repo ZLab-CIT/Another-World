@@ -4,12 +4,8 @@ using UnityEngine;
 public class VendingMachineAvatar : MonoBehaviour
 {
     [Header("References")]
-    [Tooltip("Transform that wobbles when dispensing. Auto-set to the first child SpriteRenderer if empty.")]
     [SerializeField] private Transform shakeTarget;
 
-    [Header("Dispense Point")]
-    [Tooltip("Local offset from the machine root where the product ejects.")]
-    [SerializeField] private Vector2 dispenseOffset = new(0f, -0.5f);
     [Tooltip("How far the product falls below the dispense point before landing.")]
     [SerializeField] private float fallDistance = 0.35f;
 
@@ -19,8 +15,6 @@ public class VendingMachineAvatar : MonoBehaviour
     [SerializeField] private float shakeFrequency = 38f;
 
     [Header("Eject")]
-    [Tooltip("Multiplier applied to the product scale. Lower to make dropped items smaller.")]
-    [SerializeField] private float productScaleMultiplier = 1f;
     [SerializeField] private float popDuration = 0.16f;
     [SerializeField] private float ejectUpVelocity = 0.9f;
     [SerializeField] private float gravity = -9f;
@@ -30,6 +24,9 @@ public class VendingMachineAvatar : MonoBehaviour
     [SerializeField] private int productSortingOrder = 60;
 
     private Quaternion initialLocalRotation;
+    private Coroutine activeSequence;
+    private SceneItem currentItem;
+    private Vector3 currentItemScale = Vector3.one;
 
     private void Awake()
     {
@@ -46,42 +43,85 @@ public class VendingMachineAvatar : MonoBehaviour
         initialLocalRotation = shakeTarget.localRotation;
     }
 
-    public void React(Sprite productSprite, float lifetime, float scale)
+    public void PlayDropAnimation(SceneItem item, float lifetime)
     {
-        StartCoroutine(PlaySequence(productSprite, lifetime, scale));
+        CancelAnimation(true);
+        currentItem = item;
+        activeSequence = StartCoroutine(PlaySequence(item, lifetime));
     }
 
-    private IEnumerator PlaySequence(Sprite sprite, float lifetime, float scale)
+    public void CancelAnimation(bool destroyCurrentItem = false)
     {
+        if (activeSequence != null)
+        {
+            StopCoroutine(activeSequence);
+            activeSequence = null;
+        }
+
+        // If the item got picked up mid-fade, restore its full visibility
+        if (currentItem != null)
+        {
+            currentItem.transform.localScale = currentItemScale;
+
+            if (currentItem.TryGetComponent<SpriteRenderer>(out var sr))
+            {
+                Color c = sr.color;
+                c.a = 1f;
+                sr.color = c;
+            }
+
+            if (destroyCurrentItem)
+                Destroy(currentItem.gameObject);
+
+            currentItem = null;
+        }
+    }
+
+    private IEnumerator PlaySequence(SceneItem item, float lifetime)
+    {
+        if (item == null) yield break;
+
+        // Keep the configured spawn point position, but hide the item during the shake.
+        GameObject dropObj = item.gameObject;
+        dropObj.transform.SetParent(transform, true);
+        Vector3 startPos = dropObj.transform.localPosition;
+        currentItemScale = dropObj.transform.localScale;
+        dropObj.transform.localScale = Vector3.zero;
+
+        SpriteRenderer sr = dropObj.GetComponent<SpriteRenderer>();
+        if (sr != null) sr.sortingOrder = productSortingOrder;
+
         yield return Shake();
 
-        if (sprite == null)
-            yield break;
+        if (item == null) yield break;
 
-        GameObject drop = new("VendingDrop_" + sprite.name);
-        drop.transform.SetParent(transform, false);
-        Vector3 startPos = new(dispenseOffset.x, dispenseOffset.y, 0f);
-        drop.transform.localPosition = startPos;
-        float finalScale = Mathf.Max(0.05f, scale * productScaleMultiplier);
-        drop.transform.localScale = Vector3.one * finalScale;
+        // Animations
+        yield return PopIn(dropObj.transform, currentItemScale);
+        if (item == null) yield break;
+        yield return Fall(dropObj.transform, startPos.y - fallDistance);
+        if (item == null) yield break;
+        yield return Squash(dropObj.transform);
+        if (item == null) yield break;
 
-        SpriteRenderer sr = drop.AddComponent<SpriteRenderer>();
-        sr.sprite = sprite;
-        sr.color = Color.white;
-        sr.sortingOrder = productSortingOrder;
+        // Wait on floor
+        float restTime = Mathf.Max(0f, lifetime - shakeDuration - popDuration - 0.5f - fadeDuration);
+        if (restTime > 0f)
+            yield return new WaitForSeconds(restTime);
 
-        yield return PopIn(drop.transform, finalScale);
-        yield return Fall(drop.transform, startPos.y - fallDistance);
-        yield return Squash(drop.transform);
+        if (sr != null && item != null)
+        {
+            yield return FadeOut(sr, fadeDuration);
+        }
 
-        float rest = Mathf.Max(0f, lifetime - shakeDuration - popDuration - 0.5f);
-        if (rest > 0f)
-            yield return new WaitForSeconds(rest);
+        if (item != null)
+        {
+            Destroy(item.gameObject);
+        }
 
-        yield return FadeOut(sr, fadeDuration);
+        if (currentItem == item)
+            currentItem = null;
 
-        if (drop != null)
-            Destroy(drop);
+        activeSequence = null;
     }
 
     private IEnumerator Shake()
@@ -99,25 +139,39 @@ public class VendingMachineAvatar : MonoBehaviour
         t.localRotation = initialLocalRotation;
     }
 
-    private IEnumerator PopIn(Transform t, float targetScale)
+    private IEnumerator PopIn(Transform t, Vector3 targetScale)
     {
+        if (t == null)
+            yield break;
+
         float elapsed = 0f;
         while (elapsed < popDuration)
         {
+            if (t == null)
+                yield break;
+
             elapsed += Time.deltaTime;
             float k = Mathf.Clamp01(elapsed / popDuration);
-            t.localScale = Vector3.one * (targetScale * EaseOutBack(k));
+            t.localScale = targetScale * EaseOutBack(k);
             yield return null;
         }
-        t.localScale = Vector3.one * targetScale;
+
+        if (t != null)
+            t.localScale = targetScale;
     }
 
     private IEnumerator Fall(Transform t, float landY)
     {
+        if (t == null)
+            yield break;
+
         Vector3 pos = t.localPosition;
         float velocity = ejectUpVelocity;
         while (pos.y > landY)
         {
+            if (t == null)
+                yield break;
+
             velocity += gravity * Time.deltaTime;
             pos.y += velocity * Time.deltaTime;
             if (pos.y < landY)
@@ -129,17 +183,25 @@ public class VendingMachineAvatar : MonoBehaviour
 
     private IEnumerator Squash(Transform t)
     {
+        if (t == null)
+            yield break;
+
         Vector3 baseScale = t.localScale;
         Vector3 squashed = new(baseScale.x * (1f + landSquash), baseScale.y * (1f - landSquash), baseScale.z);
         float elapsed = 0f;
         while (elapsed < landRecoverDuration)
         {
+            if (t == null)
+                yield break;
+
             elapsed += Time.deltaTime;
             float k = Mathf.Clamp01(elapsed / landRecoverDuration);
             t.localScale = Vector3.Lerp(squashed, baseScale, EaseOutCubic(k));
             yield return null;
         }
-        t.localScale = baseScale;
+
+        if (t != null)
+            t.localScale = baseScale;
     }
 
     private IEnumerator FadeOut(SpriteRenderer sr, float duration)
@@ -151,6 +213,9 @@ public class VendingMachineAvatar : MonoBehaviour
         float elapsed = 0f;
         while (elapsed < duration)
         {
+            if (sr == null)
+                yield break;
+
             elapsed += Time.deltaTime;
             c.a = 1f - Mathf.Clamp01(elapsed / duration);
             sr.color = c;

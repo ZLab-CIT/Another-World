@@ -7,6 +7,7 @@ public class OfficeCrowdCoordinator2D : MonoBehaviour
     public static OfficeCrowdCoordinator2D Instance { get; private set; }
 
     private readonly List<AIWorkerAgent> workers = new();
+    private readonly Dictionary<AIWorkerAgent, Vector2> destinationReservations = new();
     public IReadOnlyList<AIWorkerAgent> Workers => workers;
 
     private void Awake()
@@ -37,6 +38,42 @@ public class OfficeCrowdCoordinator2D : MonoBehaviour
     public void Unregister(AIWorkerAgent worker)
     {
         workers.Remove(worker);
+        destinationReservations.Remove(worker);
+    }
+
+    public bool IsPositionAvailable(Vector2 position, AIWorkerAgent requester,
+        float minimumDistance, AIWorkerAgent ignoredWorker = null)
+    {
+        float distanceSquared = minimumDistance * minimumDistance;
+        foreach (AIWorkerAgent worker in workers)
+        {
+            if (worker == null || worker == requester || worker == ignoredWorker)
+                continue;
+            if ((worker.GetPosition() - position).sqrMagnitude < distanceSquared)
+                return false;
+        }
+
+        foreach (KeyValuePair<AIWorkerAgent, Vector2> reservation in destinationReservations)
+        {
+            if (reservation.Key == null || reservation.Key == requester
+                || reservation.Key == ignoredWorker)
+                continue;
+            if ((reservation.Value - position).sqrMagnitude < distanceSquared)
+                return false;
+        }
+        return true;
+    }
+
+    public void ReserveDestination(AIWorkerAgent worker, Vector2 destination)
+    {
+        if (worker != null)
+            destinationReservations[worker] = destination;
+    }
+
+    public void ClearDestination(AIWorkerAgent worker)
+    {
+        if (worker != null)
+            destinationReservations.Remove(worker);
     }
 
     public void GetNearbyWorkers(Vector2 position, float range, AIWorkerAgent requester, List<AIWorkerAgent> result)

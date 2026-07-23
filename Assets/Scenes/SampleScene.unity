@@ -210,7 +210,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!224 &50923312
 RectTransform:
   m_ObjectHideFlags: 0
@@ -486,6 +486,7 @@ MonoBehaviour:
   colleagueStopDistance: 0.9
   movingTargetReplanInterval: 0.45
   movingTargetTimeout: 12
+  minimumWorkerSpacing: 0.75
   useLLMBrain: 1
   brainDecisionInterval: 20
   brainDirectiveTtl: 45
@@ -587,6 +588,7 @@ MonoBehaviour:
   thoughtBubblesEnabled: 1
   thoughtBubblePrefab: {fileID: 4088053113561712751, guid: ea9f94ee25f440346869932faa5074f8, type: 3}
   thoughtBubble: {fileID: 0}
+  speechBubble: {fileID: 0}
 --- !u!114 &119022415
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -612,6 +614,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   participantRadius: 1.5
+  conversationSeparationRadius: 2.25
   maxTurns: 4
   minimumLineSeconds: 2.2
   maximumLineSeconds: 4.5
@@ -718,6 +721,158 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 162166245}
   m_CullTransparentMesh: 1
+--- !u!1 &168424236
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 168424237}
+  - component: {fileID: 168424240}
+  - component: {fileID: 168424239}
+  - component: {fileID: 168424238}
+  - component: {fileID: 168424241}
+  m_Layer: 0
+  m_Name: VendingMachinePoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &168424237
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 168424236}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -6.5, y: 2.83, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1704556778}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &168424238
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 168424236}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7f3f2e1a5f0b4c2db8b5d4d7cc4d0d2a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  spawnPoint: {fileID: 1883723552}
+  itemPrefab: {fileID: 2555650749806117844, guid: 3fe18553216c24a469d7dbcb54d0a753, type: 3}
+  spritesSet: {fileID: 11400000, guid: 71150ea3eb9b6504a83450a425af305a, type: 2}
+  itemLifetime: 15
+  externalSnackLifetime: 5
+  handScaleMultiplier: 2.5
+--- !u!114 &168424239
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 168424236}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 35f46a249a284b043aa7173741c6e8a9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  actionType: 2
+  useTime: 3
+  baseScore: 4
+  slots:
+  - offset: {x: 0, y: 0}
+    facing: 1
+  itemPlacementPoint: {fileID: 0}
+  energyChange: 35
+  focusChange: 5
+  socialChange: 0
+  productivityChange: 2
+--- !u!212 &168424240
+SpriteRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 168424236}
+  m_Enabled: 0
+  m_CastShadows: 0
+  m_ReceiveShadows: 0
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 0
+  m_RayTraceProcedural: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: 2100000, guid: a97c105638bdf8b4a8650670310a4cd3, type: 2}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 0
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 1
+  m_Sprite: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+  m_Color: {r: 0.64824915, g: 0.018511813, b: 0.654088, a: 1}
+  m_FlipX: 0
+  m_FlipY: 0
+  m_DrawMode: 0
+  m_Size: {x: 0.2, y: 0.2}
+  m_AdaptiveModeThreshold: 0.5
+  m_SpriteTileMode: 0
+  m_WasSpriteAssigned: 1
+  m_MaskInteraction: 0
+  m_SpriteSortPoint: 0
+--- !u!114 &168424241
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 168424236}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7ba2eca74f4291d458bc8ab1b4c6d389, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  shakeTarget: {fileID: 336801966}
+  fallDistance: 0.35
+  shakeDuration: 0.3
+  shakeAngle: 5
+  shakeFrequency: 38
+  popDuration: 0.16
+  ejectUpVelocity: 0.9
+  gravity: -9
+  landSquash: 0.35
+  landRecoverDuration: 0.12
+  fadeDuration: 0.4
+  productSortingOrder: 60
 --- !u!1 &168687680
 GameObject:
   m_ObjectHideFlags: 0
@@ -1048,7 +1203,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 336801966}
-  - component: {fileID: 336801967}
   m_Layer: 0
   m_Name: VendingMachine
   m_TagString: Untagged
@@ -1070,34 +1224,9 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 471185857}
+  - {fileID: 1883723552}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &336801967
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 336801965}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7ba2eca74f4291d458bc8ab1b4c6d389, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  shakeTarget: {fileID: 0}
-  dispenseOffset: {x: 0, y: -0.5}
-  fallDistance: 0.35
-  shakeDuration: 0.3
-  shakeAngle: 5
-  shakeFrequency: 38
-  productScaleMultiplier: 0.3
-  popDuration: 0.16
-  ejectUpVelocity: 0.9
-  gravity: -9
-  landSquash: 0.35
-  landRecoverDuration: 0.12
-  fadeDuration: 0.4
-  productSortingOrder: 60
 --- !u!1 &343794770
 GameObject:
   m_ObjectHideFlags: 0
@@ -1873,6 +2002,7 @@ MonoBehaviour:
   colleagueStopDistance: 0.9
   movingTargetReplanInterval: 0.45
   movingTargetTimeout: 12
+  minimumWorkerSpacing: 0.75
   useLLMBrain: 1
   brainDecisionInterval: 20
   brainDirectiveTtl: 45
@@ -1912,6 +2042,7 @@ MonoBehaviour:
   thoughtBubblesEnabled: 1
   thoughtBubblePrefab: {fileID: 4088053113561712751, guid: ea9f94ee25f440346869932faa5074f8, type: 3}
   thoughtBubble: {fileID: 0}
+  speechBubble: {fileID: 0}
 --- !u!114 &496072947
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1937,6 +2068,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   participantRadius: 1.5
+  conversationSeparationRadius: 2.25
   maxTurns: 4
   minimumLineSeconds: 2.2
   maximumLineSeconds: 4.5
@@ -3276,6 +3408,7 @@ MonoBehaviour:
   colleagueStopDistance: 0.9
   movingTargetReplanInterval: 0.45
   movingTargetTimeout: 12
+  minimumWorkerSpacing: 0.75
   useLLMBrain: 1
   brainDecisionInterval: 20
   brainDirectiveTtl: 45
@@ -3377,6 +3510,7 @@ MonoBehaviour:
   thoughtBubblesEnabled: 1
   thoughtBubblePrefab: {fileID: 4088053113561712751, guid: ea9f94ee25f440346869932faa5074f8, type: 3}
   thoughtBubble: {fileID: 0}
+  speechBubble: {fileID: 0}
 --- !u!114 &765906405
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3402,6 +3536,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   participantRadius: 1.5
+  conversationSeparationRadius: 2.25
   maxTurns: 4
   minimumLineSeconds: 2.2
   maximumLineSeconds: 4.5
@@ -4654,7 +4789,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   baseUrl: https://api.groq.com/openai/v1
   apiKey: 
-  apiKeyEnvironmentVariable: GLM_API_KEY
+  apiKeyEnvironmentVariable: GROQ_API_KEY
   model: llama-3.1-8b-instant
   temperature: 0.8
   requestTimeoutSeconds: 60
@@ -4701,7 +4836,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!224 &989669625
 RectTransform:
   m_ObjectHideFlags: 0
@@ -5064,10 +5199,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5a65928fd835daa45af25fcc30d104c1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  width: 32
-  height: 20
+  width: 31
+  height: 18
   cellSize: 0.5
-  origin: {x: -8, y: -5}
+  origin: {x: -8, y: -4.75}
   obstacleMask:
     serializedVersion: 2
     m_Bits: 64
@@ -5181,6 +5316,7 @@ MonoBehaviour:
   colleagueStopDistance: 0.9
   movingTargetReplanInterval: 0.45
   movingTargetTimeout: 12
+  minimumWorkerSpacing: 0.75
   useLLMBrain: 1
   brainDecisionInterval: 20
   brainDirectiveTtl: 45
@@ -5282,6 +5418,7 @@ MonoBehaviour:
   thoughtBubblesEnabled: 1
   thoughtBubblePrefab: {fileID: 4088053113561712751, guid: ea9f94ee25f440346869932faa5074f8, type: 3}
   thoughtBubble: {fileID: 0}
+  speechBubble: {fileID: 0}
 --- !u!114 &1128272438
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5307,6 +5444,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   participantRadius: 1.5
+  conversationSeparationRadius: 2.25
   maxTurns: 4
   minimumLineSeconds: 2.2
   maximumLineSeconds: 4.5
@@ -6634,10 +6772,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 323aead9de2c70a408cb7b190f87321b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  coffeeSpawnPoint: {fileID: 1307961233}
-  coffeePrefab: {fileID: 2561711306719112999, guid: 15debb3ead17d5642bbd1dca80dbcea9, type: 3}
-  coffeeSpritesSet: {fileID: 11400000, guid: d48ad5934fe2447448292f775fa0d80b, type: 2}
-  spawnLifetime: 15
+  spawnPoint: {fileID: 1307961233}
+  itemPrefab: {fileID: 2561711306719112999, guid: 15debb3ead17d5642bbd1dca80dbcea9, type: 3}
+  spritesSet: {fileID: 11400000, guid: d48ad5934fe2447448292f775fa0d80b, type: 2}
+  itemLifetime: 15
 --- !u!1 &1630713340
 GameObject:
   m_ObjectHideFlags: 0
@@ -7093,6 +7231,7 @@ Transform:
   - {fileID: 1629408248}
   - {fileID: 1637684888}
   - {fileID: 936658477}
+  - {fileID: 168424237}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1706768841
@@ -7373,6 +7512,37 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1882662511}
   m_CullTransparentMesh: 1
+--- !u!1 &1883723551
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1883723552}
+  m_Layer: 0
+  m_Name: SpawnPoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1883723552
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1883723551}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0.14, y: -0.45, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 336801966}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1884976729
 GameObject:
   m_ObjectHideFlags: 0
@@ -7764,6 +7934,7 @@ MonoBehaviour:
   colleagueStopDistance: 0.9
   movingTargetReplanInterval: 0.45
   movingTargetTimeout: 12
+  minimumWorkerSpacing: 0.75
   useLLMBrain: 1
   brainDecisionInterval: 20
   brainDirectiveTtl: 45
@@ -7865,6 +8036,7 @@ MonoBehaviour:
   thoughtBubblesEnabled: 1
   thoughtBubblePrefab: {fileID: 4088053113561712751, guid: ea9f94ee25f440346869932faa5074f8, type: 3}
   thoughtBubble: {fileID: 0}
+  speechBubble: {fileID: 0}
 --- !u!114 &2072425301
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -7890,6 +8062,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   participantRadius: 1.5
+  conversationSeparationRadius: 2.25
   maxTurns: 4
   minimumLineSeconds: 2.2
   maximumLineSeconds: 4.5
@@ -8026,6 +8199,7 @@ MonoBehaviour:
   colleagueStopDistance: 0.9
   movingTargetReplanInterval: 0.45
   movingTargetTimeout: 12
+  minimumWorkerSpacing: 0.75
   useLLMBrain: 1
   brainDecisionInterval: 20
   brainDirectiveTtl: 45
@@ -8127,6 +8301,7 @@ MonoBehaviour:
   thoughtBubblesEnabled: 1
   thoughtBubblePrefab: {fileID: 4088053113561712751, guid: ea9f94ee25f440346869932faa5074f8, type: 3}
   thoughtBubble: {fileID: 0}
+  speechBubble: {fileID: 0}
 --- !u!114 &2132121415
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -8152,6 +8327,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   participantRadius: 1.5
+  conversationSeparationRadius: 2.25
   maxTurns: 4
   minimumLineSeconds: 2.2
   maximumLineSeconds: 4.5

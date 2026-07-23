@@ -26,6 +26,10 @@ public sealed class AgentActivity
 {
     public OfficeActionType actionType;
     public OfficeDestinationMode destinationMode;
+    public string destinationHint;
+    public string sequenceId;
+    public int sequenceStep;
+    public string objective;
     public Vector2 destination;
     public OfficeActionPoint actionPoint;
     public AIWorkerAgent targetAgent;
@@ -114,6 +118,8 @@ public class AIWorkerAgent : MonoBehaviour
     [Min(0.1f)] public float movingTargetReplanInterval = 0.45f;
     [Tooltip("Maximum total time spent pursuing a moving colleague.")]
     [Min(2f)] public float movingTargetTimeout = 12f;
+    [Tooltip("Minimum visual spacing between workers at free positions.")]
+    [Min(0.2f)] public float minimumWorkerSpacing = 0.75f;
 
     [Header("LLM Social Planning (optional)")]
     [Tooltip("If on, the LLM chooses a partner, subject, and opening before this worker travels to a social point. Ordinary actions continue to use fast utility AI.")]
@@ -162,6 +168,8 @@ public class AIWorkerAgent : MonoBehaviour
     private AgentActivity currentActivity;
     private OfficeActionPoint lastFinishedDesk;
     private string lastActionLabel;
+    private string activeSequenceId;
+    private string activeSequenceObjective;
     private bool stillSeated;
     private bool activityThoughtVisible;
     private Vector2 lastTrackedTargetPosition;
@@ -293,6 +301,12 @@ public class AIWorkerAgent : MonoBehaviour
     public Vector2 GetPosition()
     {
         return rb != null ? rb.position : (Vector2)transform.position;
+    }
+
+    public void FaceToward(Vector2 worldPosition)
+    {
+        if (presentation != null)
+            presentation.SetFacing(worldPosition - GetPosition());
     }
 
     public bool IsActingAt(OfficeActionPoint action)
@@ -437,7 +451,10 @@ public class AIWorkerAgent : MonoBehaviour
                 plannedActivities.Enqueue(plan);
                 Debug.Log("[Activity plan] " + DisplayName + ": " + plan.actionType
                     + (string.IsNullOrWhiteSpace(plan.targetAgent) ? "" : " -> " + plan.targetAgent)
-                    + " | reason: " + plan.reason + " | thought: " + plan.thought, this);
+                    + " | reason: " + plan.reason + " | thought: " + plan.thought
+                    + (string.IsNullOrWhiteSpace(plan.sequenceId) ? ""
+                        : " | sequence " + plan.sequenceId + " step "
+                            + plan.sequenceStep + ": " + plan.objective), this);
                 previousType = plan.actionType;
             }
         }
@@ -479,6 +496,7 @@ public class AIWorkerAgent : MonoBehaviour
             OfficeActivityPlan plan = plannedActivities.Dequeue();
             if (TryStartGeneratedActivity(plan))
                 return true;
+            CancelQueuedSequence(plan?.sequenceId);
         }
         return false;
     }
@@ -514,6 +532,9 @@ public class AIWorkerAgent : MonoBehaviour
         {
             actionType = plan.actionType,
             destinationMode = mode,
+            sequenceId = plan.sequenceId,
+            sequenceStep = plan.sequenceStep,
+            objective = plan.objective,
             duration = Mathf.Clamp(plan.durationSeconds, 2f, 30f),
             reason = plan.reason,
             thought = plan.thought,
@@ -575,6 +596,7 @@ public class AIWorkerAgent : MonoBehaviour
 
         currentAction = null;
         currentActivity = activity;
+        activity.destinationHint = destinationHint;
         stillSeated = false;
 
         string activityThought = !string.IsNullOrWhiteSpace(activity.thought)
@@ -629,13 +651,25 @@ public class AIWorkerAgent : MonoBehaviour
             return false;
         }
 
+        Vector2 actionDestination = action.GetTargetPosition(this);
+        if (crowd != null && !crowd.IsPositionAvailable(
+                actionDestination, this, minimumWorkerSpacing))
+        {
+            action.Release(this);
+            stateTimer = decisionDelay;
+            return false;
+        }
+
         currentAction = action;
         currentActivity = new AgentActivity
         {
             actionType = action.actionType,
             destinationMode = OfficeDestinationMode.ActionPoint,
+            sequenceId = plan != null ? plan.sequenceId : "",
+            sequenceStep = plan != null ? plan.sequenceStep : 0,
+            objective = plan != null ? plan.objective : "",
             actionPoint = action,
-            destination = action.GetTargetPosition(this),
+            destination = actionDestination,
             duration = plan != null ? Mathf.Clamp(plan.durationSeconds, 2f, 30f) : action.useTime,
             reason = plan != null ? plan.reason : "",
             thought = plan != null ? plan.thought : "",
@@ -810,6 +844,8 @@ public class AIWorkerAgent : MonoBehaviour
         return "energy " + Mathf.RoundToInt(energy) +
             ", focus " + Mathf.RoundToInt(focus) +
             ", social " + Mathf.RoundToInt(social) +
+            (string.IsNullOrWhiteSpace(activeSequenceObjective)
+                ? "" : ", continuing objective " + activeSequenceObjective) +
             (string.IsNullOrWhiteSpace(lastActionLabel) ? "" : ", just finished " + lastActionLabel);
     }
 
@@ -923,6 +959,7 @@ public class AIWorkerAgent : MonoBehaviour
         AddActivityType(result, OfficeActionType.WalkAround);
         AddActivityType(result, OfficeActionType.Think);
         AddActivityType(result, OfficeActionType.CheckPhone);
+        AddActivityType(result, OfficeActionType.VendingMachine);
         if (hasAvailableCoworker)
             AddActivityType(result, OfficeActionType.ApproachColleague);
         AddActivityType(result, OfficeActionType.Custom);
@@ -997,9 +1034,12 @@ public class AIWorkerAgent : MonoBehaviour
                 continue;
             if (Vector2.Distance(origin, candidate) < minDistance * 0.75f)
                 continue;
+            if (!IsFreeDestinationAvailable(candidate))
+                continue;
             if (!navigation.Plan(candidate))
                 continue;
 
+            crowd?.ReserveDestination(this, candidate);
             destination = candidate;
             return true;
         }
@@ -1025,9 +1065,11 @@ public class AIWorkerAgent : MonoBehaviour
                 if (requireHintMatch != zone.MatchesHint(destinationHint))
                     continue;
                 if (!zone.TrySamplePosition(grid, navigationRadius, out Vector2 candidate)
+                    || !IsFreeDestinationAvailable(candidate)
                     || !navigation.Plan(candidate))
                     continue;
 
+                crowd?.ReserveDestination(this, candidate);
                 destination = candidate;
                 return true;
             }
@@ -1089,6 +1131,7 @@ public class AIWorkerAgent : MonoBehaviour
         {
             case OfficeActionType.WorkDesk: return "work at your desk";
             case OfficeActionType.CoffeeMachine: return "grab coffee";
+            case OfficeActionType.VendingMachine: return "get a snack";
             case OfficeActionType.BreakSpot: return "take a break";
             case OfficeActionType.ChatSpot: return "chat with coworkers";
             case OfficeActionType.MeetingRoom: return "join a meeting";
@@ -1154,6 +1197,27 @@ public class AIWorkerAgent : MonoBehaviour
             }
         }
 
+        if (MustReplanOccupiedFreeDestination())
+        {
+            if (!TryPlanFreeDestination(currentActivity.actionType,
+                    currentActivity.destinationHint, out Vector2 replacement))
+            {
+                AbortMovement();
+                return;
+            }
+
+            currentActivity.destination = replacement;
+            return;
+        }
+
+        if (currentAction != null && crowd != null
+            && !crowd.IsPositionAvailable(currentAction.GetTargetPosition(this),
+                this, minimumWorkerSpacing))
+        {
+            AbortMovement();
+            return;
+        }
+
         float movementMultiplier = currentActivity != null
             && currentActivity.destinationMode == OfficeDestinationMode.FollowAgent
             ? 1.15f
@@ -1188,16 +1252,27 @@ public class AIWorkerAgent : MonoBehaviour
         if (approachDirection.sqrMagnitude < 0.01f)
             approachDirection = Vector2.right;
 
-        Vector2 requested = targetPosition
-            + approachDirection.normalized * Mathf.Max(0.4f, colleagueStopDistance * 0.8f);
-        if (!grid.TryFindNearestWalkable(requested, navigationRadius, out Vector2 destination)
-            || !navigation.Plan(destination))
-            return false;
+        float approachDistance = Mathf.Max(0.55f, colleagueStopDistance * 0.85f);
+        Vector2 baseDirection = approachDirection.normalized;
+        for (int i = 0; i < 8; i++)
+        {
+            float angle = i * 45f * Mathf.Deg2Rad;
+            Vector2 direction = new(
+                baseDirection.x * Mathf.Cos(angle) - baseDirection.y * Mathf.Sin(angle),
+                baseDirection.x * Mathf.Sin(angle) + baseDirection.y * Mathf.Cos(angle));
+            Vector2 requested = targetPosition + direction * approachDistance;
+            if (!grid.TryFindNearestWalkable(requested, navigationRadius, out Vector2 destination)
+                || !IsFreeDestinationAvailable(destination, currentActivity.targetAgent)
+                || !navigation.Plan(destination))
+                continue;
 
-        currentActivity.destination = destination;
-        lastTrackedTargetPosition = targetPosition;
-        nextTrackedTargetPlanTime = Time.time + Mathf.Max(0.1f, movingTargetReplanInterval);
-        return true;
+            crowd?.ReserveDestination(this, destination);
+            currentActivity.destination = destination;
+            lastTrackedTargetPosition = targetPosition;
+            nextTrackedTargetPlanTime = Time.time + Mathf.Max(0.1f, movingTargetReplanInterval);
+            return true;
+        }
+        return false;
     }
 
     private bool TickTrackedActivity()
@@ -1249,6 +1324,7 @@ public class AIWorkerAgent : MonoBehaviour
 
     private void StartActing()
     {
+        crowd?.ClearDestination(this);
         navigation.Clear();
         state = WorkerState.Acting;
         stateTimer = currentActivity != null
@@ -1257,9 +1333,17 @@ public class AIWorkerAgent : MonoBehaviour
         OfficeActionType startedType = currentActivity != null
             ? currentActivity.actionType
             : currentAction != null ? currentAction.actionType : OfficeActionType.Think;
+        if (!string.IsNullOrWhiteSpace(currentActivity?.sequenceId))
+        {
+            activeSequenceId = currentActivity.sequenceId;
+            activeSequenceObjective = currentActivity.objective;
+        }
         Debug.Log("[Activity started] " + DisplayName + ": " + startedType
             + (currentActivity?.targetAgent == null ? "" : " -> " + currentActivity.targetAgent.DisplayName)
-            + (string.IsNullOrWhiteSpace(currentActivity?.reason) ? "" : " | " + currentActivity.reason), this);
+            + (string.IsNullOrWhiteSpace(currentActivity?.reason) ? "" : " | " + currentActivity.reason)
+            + (string.IsNullOrWhiteSpace(currentActivity?.sequenceId) ? ""
+                : " | sequence " + currentActivity.sequenceId + " step "
+                    + currentActivity.sequenceStep + ": " + currentActivity.objective), this);
         socialArrivalTime = currentAction != null && AgentConversationController.IsSocialSpot(currentAction.actionType)
             ? Time.time
             : -1f;
@@ -1277,6 +1361,8 @@ public class AIWorkerAgent : MonoBehaviour
         else if (currentActivity != null && currentActivity.targetAgent != null)
             presentation.SetFacing(currentActivity.targetAgent.GetPosition() - GetPosition());
 
+        presentation.EndActionPerformance();
+
         if (currentActivity != null
             && currentActivity.actionType == OfficeActionType.ApproachColleague
             && currentActivity.targetAgent != null)
@@ -1290,6 +1376,12 @@ public class AIWorkerAgent : MonoBehaviour
             CoffeeMachine machine = currentAction.GetComponent<CoffeeMachine>();
             if (machine != null)
                 machine.SpawnRandomCoffeeCup();
+        }
+        else if (currentAction != null && currentAction.actionType == OfficeActionType.VendingMachine)
+        {
+            VendingMachine machine = currentAction.GetComponent<VendingMachine>();
+            if (machine != null)
+                machine.SpawnSnack();
         }
 
         conversation.OnStartedActing(currentAction);
@@ -1332,12 +1424,33 @@ public class AIWorkerAgent : MonoBehaviour
             presentation.HideThought();
     }
 
+    public void ShowSpeech(string speakerName, string content, Color speakerColor)
+    {
+        if (presentation != null)
+            presentation.ShowSpeech(speakerName, content, speakerColor);
+    }
+
+    public void HideSpeech()
+    {
+        if (presentation != null)
+            presentation.HideSpeech();
+    }
+
     public void PickupItem(SceneItem item, float holdDuration = 0f)
     {
         if (presentation != null)
         {
             item?.CancelScheduledDestroy();
             presentation.AttachItemToHand(item, default, default, default, holdDuration);
+        }
+    }
+
+    public void PickupItem(SceneItem item, float holdDuration, Vector3 localScale)
+    {
+        if (presentation != null)
+        {
+            item?.CancelScheduledDestroy();
+            presentation.AttachItemToHand(item, default, localScale, default, holdDuration);
         }
     }
 
@@ -1376,7 +1489,7 @@ public class AIWorkerAgent : MonoBehaviour
         Debug.Log("[Call nearby] " + DisplayName + " called "
             + activity.targetAgent.DisplayName, this);
         Debug.Log("[Chat] " + DisplayName + ": " + call, this);
-        ShowThought(DisplayName + "\n" + call);
+        ShowSpeech(DisplayName, call, new Color32(47, 111, 237, 255));
         activityThoughtVisible = true;
 
         activity.targetAgent.PauseForNearbyColleague(
@@ -1429,7 +1542,7 @@ public class AIWorkerAgent : MonoBehaviour
         stateTimer = currentActivity.duration;
         string response = "Yes, " + caller.DisplayName + "?";
         Debug.Log("[Chat] " + DisplayName + ": " + response, this);
-        ShowThought(DisplayName + "\n" + response);
+        ShowSpeech(DisplayName, response, new Color32(47, 133, 90, 255));
         activityThoughtVisible = true;
     }
 
@@ -1467,6 +1580,14 @@ public class AIWorkerAgent : MonoBehaviour
                 SceneItem cup = machine != null ? machine.ConsumeLastCup() : null;
                 if (cup != null)
                     PickupItem(cup, coffeeHoldDuration);
+            }
+            else if (finishedAction.actionType == OfficeActionType.VendingMachine)
+            {
+                VendingMachine machine = finishedAction.GetComponent<VendingMachine>();
+                SceneItem snack = machine != null ? machine.ConsumeLastSnack() : null;
+                if (snack != null)
+                    PickupItem(snack, coffeeHoldDuration,
+                        machine != null ? machine.GetHandScale(snack) : Vector3.one);
             }
 
             currentAction.Release(this);
@@ -1514,12 +1635,27 @@ public class AIWorkerAgent : MonoBehaviour
         if (bridge != null)
             bridge.EvaluateProductivityMilestone();
 
+        string completedSequence = currentActivity?.sequenceId;
+        bool sequenceContinues = !string.IsNullOrWhiteSpace(completedSequence)
+            && plannedActivities.Count > 0
+            && string.Equals(plannedActivities.Peek()?.sequenceId, completedSequence,
+                System.StringComparison.OrdinalIgnoreCase);
+        if (!sequenceContinues && string.Equals(activeSequenceId, completedSequence,
+                System.StringComparison.OrdinalIgnoreCase))
+        {
+            activeSequenceId = "";
+            activeSequenceObjective = "";
+        }
+
         ClearCurrentActivity();
         ReturnToThinking();
+        if (sequenceContinues)
+            stateTimer = 0.05f;
     }
 
     private void AbortMovement()
     {
+        CancelQueuedSequence(currentActivity?.sequenceId);
         if (currentAction != null)
         {
             currentAction.Release(this);
@@ -1618,6 +1754,8 @@ public class AIWorkerAgent : MonoBehaviour
 
     private void ClearCurrentActivity()
     {
+        crowd?.ClearDestination(this);
+        presentation?.EndActionPerformance();
         currentActivity = null;
         trackedActivityDeadline = 0f;
         nextTrackedTargetPlanTime = 0f;
@@ -1625,7 +1763,50 @@ public class AIWorkerAgent : MonoBehaviour
             return;
 
         HideThought();
+        HideSpeech();
         activityThoughtVisible = false;
+    }
+
+    private void CancelQueuedSequence(string sequenceId)
+    {
+        if (string.IsNullOrWhiteSpace(sequenceId))
+            return;
+
+        int count = plannedActivities.Count;
+        for (int i = 0; i < count; i++)
+        {
+            OfficeActivityPlan queued = plannedActivities.Dequeue();
+            if (queued == null || !string.Equals(queued.sequenceId, sequenceId,
+                    System.StringComparison.OrdinalIgnoreCase))
+                plannedActivities.Enqueue(queued);
+        }
+
+        if (string.Equals(activeSequenceId, sequenceId,
+                System.StringComparison.OrdinalIgnoreCase))
+        {
+            activeSequenceId = "";
+            activeSequenceObjective = "";
+        }
+        Debug.Log("[Activity sequence cancelled] " + DisplayName + ": " + sequenceId, this);
+    }
+
+    private bool IsFreeDestinationAvailable(Vector2 destination,
+        AIWorkerAgent ignoredWorker = null)
+    {
+        float spacing = Mathf.Max(minimumWorkerSpacing, navigationRadius * 2f);
+        return crowd == null
+            || crowd.IsPositionAvailable(destination, this, spacing, ignoredWorker);
+    }
+
+    private bool MustReplanOccupiedFreeDestination()
+    {
+        if (currentActivity == null
+            || currentActivity.destinationMode != OfficeDestinationMode.FreePosition)
+            return false;
+
+        float checkDistance = Mathf.Max(1f, minimumWorkerSpacing * 1.5f);
+        return Vector2.Distance(GetPosition(), currentActivity.destination) <= checkDistance
+            && !IsFreeDestinationAvailable(currentActivity.destination);
     }
 
     private void ReturnToThinking()
@@ -1664,6 +1845,14 @@ public class AIWorkerAgent : MonoBehaviour
 
         if (actionPoint.CurrentUsers > 0 && actionPoint.actionType == OfficeActionType.ChatSpot)
             score += social < 35f ? 8f : 2f;
+
+        if (actionPoint.actionType == OfficeActionType.VendingMachine)
+        {
+            float snackNeed = Mathf.Clamp01((100f - energy) / 100f);
+            score += 10f + snackNeed * 18f;
+            if (presentation != null && presentation.IsHolding)
+                score -= 12f;
+        }
 
         if (actionPoint.actionType == OfficeActionType.WorkDesk)
         {

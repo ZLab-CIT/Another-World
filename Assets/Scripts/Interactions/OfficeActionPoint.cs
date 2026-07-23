@@ -5,6 +5,7 @@ public enum OfficeActionType
 {
     WorkDesk,
     CoffeeMachine,
+    VendingMachine,
     BreakSpot,
     ChatSpot,
     MeetingRoom,

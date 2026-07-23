@@ -14,6 +14,7 @@ public class AgentConversationController : MonoBehaviour
     private const int RecentFallbackReplyLimit = 24;
 
     [SerializeField, Min(0.1f)] private float participantRadius = 1.5f;
+    [SerializeField, Min(0.5f)] private float conversationSeparationRadius = 2.25f;
     [SerializeField, Min(1)] private int maxTurns = 7;
     [SerializeField, Min(0.5f)] private float minimumLineSeconds = 2.2f;
     [SerializeField, Min(0.5f)] private float maximumLineSeconds = 4.5f;
@@ -24,7 +25,6 @@ public class AgentConversationController : MonoBehaviour
     private float nextSocialCheckTime;
     private bool inConversation;
     private int localStarterVariation;
-    private AgentThoughtBubble activeGroupDialogue;
     public bool IsInConversation => inConversation;
     public bool IsSociallyCoolingDown => Time.time < nextSocialCheckTime;
 
@@ -43,11 +43,7 @@ public class AgentConversationController : MonoBehaviour
     {
         inConversation = false;
         owner?.HideThought();
-        if (activeGroupDialogue != null)
-        {
-            Destroy(activeGroupDialogue.gameObject);
-            activeGroupDialogue = null;
-        }
+        owner?.HideSpeech();
     }
 
     public void OnStartedActing(OfficeActionPoint action)
@@ -395,6 +391,9 @@ public class AgentConversationController : MonoBehaviour
     {
         if (action != null && activeConversationActions.Contains(action))
             return;
+        participants = SelectConversationPair(participants, intendedPartnerName);
+        if (participants.Count == 0 || HasUnrelatedConversationNearby(participants))
+            return;
         if (action != null)
             activeConversationActions.Add(action);
 
@@ -444,7 +443,8 @@ public class AgentConversationController : MonoBehaviour
         AgentConversationController targetConversation = GetController(target);
         if (target == null || target == owner || inConversation
             || targetConversation == null || targetConversation.inConversation
-            || string.IsNullOrWhiteSpace(openingLine))
+            || string.IsNullOrWhiteSpace(openingLine)
+            || HasUnrelatedConversationNearby(new List<AIWorkerAgent> { target }))
             return false;
 
         BeginConversation(null, new List<AIWorkerAgent> { target }, openingLine,
@@ -462,8 +462,6 @@ public class AgentConversationController : MonoBehaviour
             if (participant != null && participant != owner)
                 speakers.Add(participant);
 
-        activeGroupDialogue = CreateGroupDialogue(action);
-        AgentThoughtBubble groupDialogue = activeGroupDialogue;
         HideAll(speakers);
         List<ConversationTurn> completedTurns = new();
         List<SocialMemoryEntry> completedSocialEvents = null;
@@ -471,11 +469,10 @@ public class AgentConversationController : MonoBehaviour
 
         try
         {
-            await DisplayTurnAsync(owner, openerLine, speakers, groupDialogue);
+            await DisplayTurnAsync(owner, openerLine, speakers);
             onOpeningSpoken?.Invoke();
             owner.ApplyEffects(0f, 0f, 5f, 0f);
 
-            AddLateParticipants(action, participants, speakers);
             contexts = BuildParticipantContexts(speakers);
             int replyCount = Mathf.Clamp(maxTurns - 1, 1, 6);
             if (speakers.Count > 2)
@@ -499,7 +496,7 @@ public class AgentConversationController : MonoBehaviour
                 if (speaker == null || string.IsNullOrWhiteSpace(turn.line))
                     continue;
                 completedTurns.Add(turn);
-                await DisplayTurnAsync(speaker, turn.line, speakers, groupDialogue);
+                await DisplayTurnAsync(speaker, turn.line, speakers);
                 speaker.ApplyEffects(0f, 0f, 5f, 0f);
                 ExtendAll(speakers, 6f, includeOwner: false);
             }
@@ -521,13 +518,6 @@ public class AgentConversationController : MonoBehaviour
             SetConversationCooldown(speakers, 2.5f);
             EndConversation(participants);
             ReleaseAfterConversation(speakers);
-            if (groupDialogue != null)
-            {
-                groupDialogue.Hide();
-                Destroy(groupDialogue.gameObject);
-            }
-            if (activeGroupDialogue == groupDialogue)
-                activeGroupDialogue = null;
             if (action != null)
                 activeConversationActions.Remove(action);
         }
@@ -600,7 +590,7 @@ public class AgentConversationController : MonoBehaviour
         if (speakerOrder == null)
             return turns;
 
-        string subject = ShortTopic(string.IsNullOrWhiteSpace(topic) ? openerLine : topic);
+        string subject = ResolveFallbackSubject(topic, openerLine);
         bool birthday = IsBirthdayTopic(openerLine) || IsBirthdayTopic(topic);
         bool hatGift = ContainsIgnoreCase(openerLine, "hat") || ContainsIgnoreCase(topic, "hat");
         bool snackGift = ContainsIgnoreCase(openerLine, "snack") || ContainsIgnoreCase(topic, "snack");
@@ -609,18 +599,18 @@ public class AgentConversationController : MonoBehaviour
 
         string[] templates =
         {
-            "My answer changes if this affects tomorrow's work.",
-            "I would test the smallest version before anyone gets attached.",
-            "That sounds easy until the second person has an opinion.",
-            "I like the idea more if it does not create hidden chores.",
-            "I can answer, but my first instinct is probably too blunt.",
-            "Give me the version with consequences, not the polite version.",
-            "That sounds like one of those choices that gets weird later.",
-            "My answer depends on who has to maintain it afterward.",
-            "I would ask who benefits before I defend the idea.",
-            "The practical answer and the fun answer are not the same.",
-            "I need one concrete example before I trust my reaction.",
-            "That feels useful, but only if people actually notice it."
+            "For " + subject + ", I need one concrete example.",
+            "I would test " + subject + " on a small scale first.",
+            "The hard part of " + subject + " is maintaining it.",
+            "I like " + subject + " if it avoids extra chores.",
+            "My practical answer about " + subject + " is still cautious.",
+            "Who benefits most from " + subject + " right now?",
+            "I think " + subject + " could get complicated later.",
+            "For " + subject + ", the consequences matter most.",
+            "I would ask who maintains " + subject + " afterward.",
+            "The useful part of " + subject + " needs to be clear.",
+            "What part of " + subject + " would we change first?",
+            "I support " + subject + " if people actually notice it."
         };
 
         int offset = ConversationTemplateOffset(subject, speakerOrder);
@@ -821,6 +811,49 @@ public class AgentConversationController : MonoBehaviour
         return result.ToString();
     }
 
+    private static string ResolveFallbackSubject(string topic, string openerLine)
+    {
+        string seed = string.IsNullOrWhiteSpace(topic) ? openerLine : topic;
+        seed = StripAddressedName(seed);
+        seed = SpokenSubject(seed);
+        string subject = ShortTopic(seed);
+        if (string.IsNullOrWhiteSpace(subject) || IsPersonNameLike(subject))
+            subject = "that issue";
+        return subject;
+    }
+
+    private static bool IsPersonNameLike(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+        string[] words = value.Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        return words.Length == 1 && value.Length >= 3 && value.Length <= 20;
+    }
+
+    private static string StripAddressedName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        string trimmed = value.TrimStart();
+        int comma = trimmed.IndexOf(',');
+        if (comma <= 0 || comma > 20)
+            return trimmed;
+
+        string lead = trimmed.Substring(0, comma).Trim();
+        if (lead.Length == 0 || lead.Length > 20)
+            return trimmed;
+
+        for (int i = 0; i < lead.Length; i++)
+        {
+            char c = lead[i];
+            if (!char.IsLetter(c) && c != '\'' && c != '-')
+                return trimmed;
+        }
+
+        return trimmed.Substring(comma + 1).TrimStart();
+    }
+
     private static string FindAddressedName(string openerLine, List<AIWorkerAgent> candidates)
     {
         if (string.IsNullOrWhiteSpace(openerLine) || candidates == null)
@@ -882,32 +915,40 @@ public class AgentConversationController : MonoBehaviour
     }
 
     private async Task DisplayTurnAsync(AIWorkerAgent speaker, string line,
-        List<AIWorkerAgent> speakers, AgentThoughtBubble groupDialogue)
+        List<AIWorkerAgent> speakers)
     {
         Debug.Log("[Chat] " + speaker.DisplayName + ": " + line, speaker);
 
-        if (groupDialogue != null)
-            groupDialogue.ShowDialogue(speaker.DisplayName, line, GetSpeakerColor(speaker));
-        else
-        {
-            HideAll(speakers);
-            speaker.ShowThought($"{speaker.DisplayName}\n{line}");
-        }
+        OrientTowardSpeaker(speakers, speaker);
+        HideAll(speakers);
+        speaker.ShowSpeech(speaker.DisplayName, line, GetSpeakerColor(speaker));
 
         float seconds = Mathf.Clamp(1.4f + line.Length * 0.055f, minimumLineSeconds, maximumLineSeconds);
         await Task.Delay(Mathf.RoundToInt(seconds * 1000f));
-        if (groupDialogue == null)
-            speaker.HideThought();
+        speaker.HideSpeech();
         if (betweenTurnsSeconds > 0f)
             await Task.Delay(Mathf.RoundToInt(betweenTurnsSeconds * 1000f));
     }
 
-    private AgentThoughtBubble CreateGroupDialogue(OfficeActionPoint action)
+    private static void OrientTowardSpeaker(List<AIWorkerAgent> speakers,
+        AIWorkerAgent activeSpeaker)
     {
-        if (action == null || !owner.TryGetComponent(out AgentPresentation2D presentation))
-            return null;
+        if (activeSpeaker == null || speakers == null)
+            return;
 
-        return presentation.CreateSharedDialogueBubble(action.transform);
+        Vector2 listenerCenter = Vector2.zero;
+        int listenerCount = 0;
+        foreach (AIWorkerAgent participant in speakers)
+        {
+            if (participant == null || participant == activeSpeaker)
+                continue;
+            participant.FaceToward(activeSpeaker.GetPosition());
+            listenerCenter += participant.GetPosition();
+            listenerCount++;
+        }
+
+        if (listenerCount > 0)
+            activeSpeaker.FaceToward(listenerCenter / listenerCount);
     }
 
     private static Color GetSpeakerColor(AIWorkerAgent speaker)
@@ -934,7 +975,10 @@ public class AgentConversationController : MonoBehaviour
     {
         foreach (AIWorkerAgent speaker in speakers)
             if (speaker != null)
+            {
                 speaker.HideThought();
+                speaker.HideSpeech();
+            }
     }
 
     private static void RememberConversation(LLMBrainService brain,
@@ -1003,6 +1047,68 @@ public class AgentConversationController : MonoBehaviour
             worker.ExtendActing(30f);
             worker.HideThought();
         }
+    }
+
+    private List<AIWorkerAgent> SelectConversationPair(
+        List<AIWorkerAgent> participants, string intendedPartnerName)
+    {
+        List<AIWorkerAgent> result = new();
+        if (participants == null)
+            return result;
+
+        AIWorkerAgent selected = null;
+        if (!string.IsNullOrWhiteSpace(intendedPartnerName))
+            selected = participants.Find(worker => worker != null
+                && string.Equals(worker.DisplayName, intendedPartnerName,
+                    StringComparison.OrdinalIgnoreCase));
+
+        if (selected == null)
+        {
+            float nearestDistance = float.MaxValue;
+            foreach (AIWorkerAgent worker in participants)
+            {
+                if (worker == null)
+                    continue;
+                float distance = Vector2.Distance(owner.GetPosition(), worker.GetPosition());
+                if (distance >= nearestDistance)
+                    continue;
+                nearestDistance = distance;
+                selected = worker;
+            }
+        }
+
+        if (selected != null)
+            result.Add(selected);
+        return result;
+    }
+
+    private bool HasUnrelatedConversationNearby(List<AIWorkerAgent> participants)
+    {
+        OfficeCrowdCoordinator2D crowd = OfficeCrowdCoordinator2D.Instance;
+        if (crowd == null)
+            return false;
+
+        float radiusSquared = conversationSeparationRadius * conversationSeparationRadius;
+        foreach (AIWorkerAgent worker in crowd.Workers)
+        {
+            if (worker == null || worker == owner
+                || (participants != null && participants.Contains(worker)))
+                continue;
+            AgentConversationController controller = GetController(worker);
+            if (controller == null || !controller.inConversation)
+                continue;
+
+            if ((worker.GetPosition() - owner.GetPosition()).sqrMagnitude < radiusSquared)
+                return true;
+            if (participants == null)
+                continue;
+            foreach (AIWorkerAgent participant in participants)
+                if (participant != null
+                    && (worker.GetPosition() - participant.GetPosition()).sqrMagnitude
+                        < radiusSquared)
+                    return true;
+        }
+        return false;
     }
 
     private void IncrementAffinity(string displayName)

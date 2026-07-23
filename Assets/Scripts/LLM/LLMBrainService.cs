@@ -46,6 +46,9 @@ public sealed class OfficeActivityPlan
     public OfficeActionType actionType;
     public OfficeDestinationMode destinationMode;
     public string destinationHint;
+    public string sequenceId;
+    public int sequenceStep;
+    public string objective;
     public string targetAgent;
     public float durationSeconds;
     public string reason;
@@ -567,11 +570,14 @@ public class LLMBrainService : MonoBehaviour
                     profile.personality + " Create a short, varied sequence that fits their needs, personality, and recent context. " +
                     "When practical, honor an unresolved promise, favor, invitation, or plan from social memory. " +
                     "Do not repeat the same action consecutively or fill the sequence with desk work. " +
+                    "When one objective needs multiple physical steps, make 2 to 4 consecutive activities a linked sequence. " +
+                    "Give those activities the same short sequenceId and objective, with sequenceStep starting at 1 and increasing by 1. " +
+                    "Example: walk to printer, use printer, then return to desk. Leave sequenceId and objective empty and sequenceStep 0 for independent activities. " +
                     "ActionPoint means an exact object such as a desk, printer, or coffee machine. " +
                     "FreePosition means a reachable place in the office. CurrentPosition means no travel. " +
                     "FollowAgent means approach the named coworker's live position; use it only for ApproachColleague. " +
                     "You may use Custom as actionType to invent a new custom action not tied to any scene object; set customActionLabel to a short description (e.g., \"stretch arms\", \"look out window\"). " +
-                    "Custom actions cannot create, fetch, carry, give, or transfer objects. Do not plan snacks, food, presents, birthday gifts, or other unavailable items. " +
+                    "Custom actions cannot create, fetch, carry, give, or transfer objects. Do not plan snacks, food, presents, birthday gifts, or other unavailable items unless the action is VendingMachine. " +
                     "Custom actions use FreePosition or CurrentPosition as destinationMode. " +
                     "Optionally set energyChange, focusChange, socialChange, productivityChange (negative to decrease, positive to increase, default 0) to describe need effects. " +
                     "If an activity physically fulfills one open social-memory commitment, copy that memory's subject exactly into socialMemorySubject; otherwise use an empty string. " +
@@ -579,6 +585,7 @@ public class LLMBrainService : MonoBehaviour
                     "socialOpeningLine must use simple everyday English and contain one sentence of 4 to 12 words with one clear idea. " +
                     "Respond only as JSON with exactly one activities array: " +
                     "{\"activities\":[{\"actionType\":string,\"destinationMode\":string,\"destinationHint\":string," +
+                    "\"sequenceId\":string,\"sequenceStep\":number,\"objective\":string," +
                     "\"targetAgent\":string,\"durationSeconds\":number,\"reason\":string,\"thought\":string," +
                     "\"customActionLabel\":string,\"energyChange\":number,\"focusChange\":number,\"socialChange\":number,\"productivityChange\":number,\"socialMemorySubject\":string,\"socialOpeningLine\":string}" +
                     "]}. Return exactly " + requestedCount + " activity objects. " +
@@ -838,15 +845,16 @@ public class LLMBrainService : MonoBehaviour
             {
                 new ChatMessage("system",
                     "Continue one natural face-to-face workplace conversation. Each reply value is spoken by the assigned " +
-                    "character. Each line must directly react to what came before, remain on the established subject, and " +
+                    "character. This short exchange has one subject only. Do not introduce a new topic, story, plan, invitation, " +
+                    "or unrelated question. Each line must directly react to the immediately previous line and must mention either " +
+                    "the established subject or one concrete detail from that previous line. Keep the same people and facts, and " +
                     "sound distinctively like that character. Use at least one specific profile detail, interest, relationship, " +
                     "memory, job detail, or speech-style cue across the replies; avoid reusable workplace filler. " +
                     "Use simple everyday spoken English and contractions. Let people answer, " +
                     "add a concrete detail, tease, hesitate, or disagree when appropriate; they must not merely praise or agree. " +
                     "Each line must express one clear idea in one sentence. Prefer common words a child or new English learner can understand. " +
                     "Avoid metaphors, abstract advice, corporate language, semicolons, and long explanations. " +
-                    "When it fits naturally, one person may invite someone, ask for help, make a promise, or share a confidence; do not force this into every conversation. " +
-                    "Characters may offer to bring coffee, because they can physically fetch and deliver it. Do not offer snacks, food, gifts, or other unavailable objects. " +
+                    "Characters may offer to bring coffee, because they can physically fetch and deliver it. A vending machine can dispense a snack for the actor to hold locally. Do not offer snacks, food, gifts, or other unavailable objects unless the action is VendingMachine. " +
                     "Do not claim someone brought, carries, owns, gives, or received an object unless the opening line explicitly establishes that physical object. " +
                     "A private social memory belongs only to the named character until they choose to say it aloud. " +
                     "Every reply value must be non-empty and use 3 to 12 words. Do not invent shared history, switch roles, narrate actions, use speaker labels " +
@@ -866,7 +874,7 @@ public class LLMBrainService : MonoBehaviour
             LLMOptions options = new()
             {
                 requestLabel = "ConversationScript",
-                temperature = Mathf.Clamp(temperature, 0.65f, 0.82f),
+                temperature = Mathf.Clamp(temperature, 0.55f, 0.72f),
                 maxTokens = Mathf.Clamp(56 * speakerOrder.Count + 100, 220, 440),
                 jsonMode = true,
                 structuredSchema = LLMJsonSchema.ConversationScript,
@@ -1186,6 +1194,7 @@ public class LLMBrainService : MonoBehaviour
                 result.Add(plan);
                 previousType = plan.actionType;
             }
+            NormalizeActivitySequences(result);
             return result.Count > 0 ? result : null;
         }
         catch
@@ -1278,6 +1287,9 @@ public class LLMBrainService : MonoBehaviour
             actionType = actionType,
             destinationMode = destinationMode,
             destinationHint = CleanShortText(dto.destinationHint, 3),
+            sequenceId = CleanShortText(dto.sequenceId, 4),
+            sequenceStep = Mathf.Max(0, dto.sequenceStep),
+            objective = CleanShortText(dto.objective, 12),
             targetAgent = targetAgent,
             durationSeconds = Mathf.Clamp(dto.durationSeconds <= 0f ? 5f : dto.durationSeconds, 2f, 30f),
             reason = CleanShortText(dto.reason, 14),
@@ -1292,6 +1304,52 @@ public class LLMBrainService : MonoBehaviour
             socialOpeningLine = commitment != null && socialAction
                 ? CleanShortText(dto.socialOpeningLine, 20) : ""
         };
+    }
+
+    private static void NormalizeActivitySequences(List<OfficeActivityPlan> plans)
+    {
+        if (plans == null)
+            return;
+
+        int index = 0;
+        while (index < plans.Count)
+        {
+            OfficeActivityPlan first = plans[index];
+            if (first == null || string.IsNullOrWhiteSpace(first.sequenceId))
+            {
+                ClearSequence(first);
+                index++;
+                continue;
+            }
+
+            int end = index + 1;
+            while (end < plans.Count && plans[end] != null
+                && string.Equals(plans[end].sequenceId, first.sequenceId,
+                    StringComparison.OrdinalIgnoreCase))
+                end++;
+
+            bool valid = end - index >= 2 && !string.IsNullOrWhiteSpace(first.objective);
+            for (int i = index; valid && i < end; i++)
+            {
+                valid = plans[i].sequenceStep == i - index + 1
+                    && string.Equals(plans[i].objective, first.objective,
+                        StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (!valid)
+                for (int i = index; i < end; i++)
+                    ClearSequence(plans[i]);
+            index = end;
+        }
+    }
+
+    private static void ClearSequence(OfficeActivityPlan plan)
+    {
+        if (plan == null)
+            return;
+        plan.sequenceId = "";
+        plan.sequenceStep = 0;
+        plan.objective = "";
     }
 
     private static SocialMemoryEntry FindOpenSocialMemory(AgentProfile profile, string candidate)
@@ -1386,6 +1444,8 @@ public class LLMBrainService : MonoBehaviour
             return "topic was empty or too vague";
         if (IsGenericTopic(topic))
             return "topic was a generic conversation label instead of a concrete subject";
+        if (LooksLikePersonName(topic, coworkers))
+            return "topic was just a person's name instead of a concrete subject";
         if (IsSimilarToAny(topic, profile.recentTopics, 0.7f))
             return "topic repeated a recent subject";
 
@@ -1444,6 +1504,7 @@ public class LLMBrainService : MonoBehaviour
         }
 
         List<ConversationTurn> accepted = new();
+        ConversationThreadState thread = new(topic, openingLine);
         List<string> lines = new() { openingLine };
         string[] generatedLines =
         {
@@ -1487,8 +1548,7 @@ public class LLMBrainService : MonoBehaviour
                         openingSpeaker, openingLine)
                     : null;
             }
-            string continuityContext = topic + " " + openingLine + " " + string.Join(" ", lines);
-            if (!HasConversationContinuity(line, continuityContext))
+            if (!thread.TryAccept(line))
             {
                 rejection = "turn " + (i + 1) + " changed to an unrelated subject";
                 return accepted.Count > 0
@@ -1583,20 +1643,61 @@ public class LLMBrainService : MonoBehaviour
         return false;
     }
 
-    private static bool HasConversationContinuity(string line, string context)
+    private sealed class ConversationThreadState
     {
-        if (CountWords(line) <= 6 || HasMeaningfulOverlap(line, context))
-            return true;
-        string normalized = NormalizeForComparison(line);
-        string[] directReactions =
+        private readonly HashSet<string> subjectAnchors;
+        private HashSet<string> previousAnchors;
+
+        public ConversationThreadState(string topic, string openingLine)
         {
-            "that sounds", "tell me more", "why do you", "i agree", "i disagree",
-            "you are right", "good idea", "bad idea", "what happened next"
-        };
-        foreach (string reaction in directReactions)
-            if (normalized.StartsWith(reaction, StringComparison.Ordinal))
-                return true;
-        return false;
+            subjectAnchors = MeaningfulWords(NormalizeForComparison(
+                (topic ?? "") + " " + (openingLine ?? "")));
+            previousAnchors = MeaningfulWords(NormalizeForComparison(openingLine));
+        }
+
+        public bool TryAccept(string line)
+        {
+            string normalized = NormalizeForComparison(line);
+            if (StartsNewSubject(normalized))
+                return false;
+
+            HashSet<string> lineAnchors = MeaningfulWords(normalized);
+            bool anchored = lineAnchors.Overlaps(subjectAnchors)
+                || lineAnchors.Overlaps(previousAnchors)
+                || IsDirectReaction(normalized);
+            if (!anchored)
+                return false;
+
+            previousAnchors = lineAnchors;
+            return true;
+        }
+
+        private static bool StartsNewSubject(string line)
+        {
+            string[] starters =
+            {
+                "by the way", "speaking of something else", "on another topic",
+                "anyway have you", "forget that"
+            };
+            foreach (string starter in starters)
+                if (line.StartsWith(starter, StringComparison.Ordinal))
+                    return true;
+            return false;
+        }
+
+        private static bool IsDirectReaction(string line)
+        {
+            string[] reactions =
+            {
+                "that sounds", "tell me more", "why do you", "i agree", "i disagree",
+                "you are right", "good idea", "bad idea", "what happened next",
+                "yes", "no", "exactly", "maybe", "really", "thank you", "thanks"
+            };
+            foreach (string reaction in reactions)
+                if (line.StartsWith(reaction, StringComparison.Ordinal))
+                    return true;
+            return false;
+        }
     }
 
     private static string BuildReplyKeyList(int count)
@@ -1672,6 +1773,44 @@ public class LLMBrainService : MonoBehaviour
             if (value.Contains(phrase))
                 return true;
         return false;
+    }
+
+    private static bool LooksLikePersonName(string topic, List<ConversationParticipantContext> coworkers)
+    {
+        string value = NormalizeForComparison(topic);
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        string[] words = value.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 1 && IsNameLikeToken(words[0]))
+            return true;
+
+        if (coworkers != null)
+        {
+            foreach (ConversationParticipantContext coworker in coworkers)
+            {
+                if (coworker == null || string.IsNullOrWhiteSpace(coworker.displayName))
+                    continue;
+                if (value == NormalizeForComparison(coworker.displayName))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsNameLikeToken(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length < 3 || value.Length > 20)
+            return false;
+
+        foreach (char c in value)
+        {
+            if (!char.IsLetter(c) && c != '\'' && c != '-')
+                return false;
+        }
+
+        return true;
     }
 
     private static string ExtractJson(string raw)
@@ -2250,6 +2389,9 @@ public class LLMBrainService : MonoBehaviour
         public string actionType;
         public string destinationMode;
         public string destinationHint;
+        public string sequenceId;
+        public int sequenceStep;
+        public string objective;
         public string targetAgent;
         public float durationSeconds;
         public string reason;

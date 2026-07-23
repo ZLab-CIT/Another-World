@@ -1,6 +1,7 @@
 using System.Collections;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 public class AgentThoughtBubble : MonoBehaviour
 {
@@ -28,6 +29,7 @@ public class AgentThoughtBubble : MonoBehaviour
     private RectTransform backgroundRect;
     private RectTransform messageRect;
     private Canvas bubbleCanvas;
+    private Image backgroundImage;
     private readonly Vector3[] worldCorners = new Vector3[4];
 
     private void Awake()
@@ -45,6 +47,7 @@ public class AgentThoughtBubble : MonoBehaviour
 
     public void Show(string content)
     {
+        ConfigureThoughtStyle();
         if (!PrepareContent(content))
             return;
 
@@ -56,6 +59,7 @@ public class AgentThoughtBubble : MonoBehaviour
 
     public void ShowDialogue(string speakerName, string content, Color speakerColor)
     {
+        ConfigureSpeechStyle(speakerColor);
         string color = ColorUtility.ToHtmlStringRGB(speakerColor);
         string header = SanitizeRichText(speakerName);
         string body = SanitizeRichText(content);
@@ -66,6 +70,20 @@ public class AgentThoughtBubble : MonoBehaviour
             StopCoroutine(activeRoutine);
 
         activeRoutine = StartCoroutine(FadeInOnly());
+    }
+
+    public void ConfigureThoughtStyle()
+    {
+        EnsureBackgroundImage();
+        if (backgroundImage != null)
+            backgroundImage.color = new Color(1f, 0.97f, 0.78f, 0.98f);
+    }
+
+    public void ConfigureSpeechStyle(Color speakerColor)
+    {
+        EnsureBackgroundImage();
+        if (backgroundImage != null)
+            backgroundImage.color = Color.Lerp(Color.white, speakerColor, 0.18f);
     }
 
     public void Hide()
@@ -101,12 +119,24 @@ public class AgentThoughtBubble : MonoBehaviour
         if (backgroundRect == null)
             return;
 
+        EnsureBackgroundImage();
+
         // Keep the bottom of the bubble fixed above the character and let added
         // lines grow upward instead of covering the character.
         float bottom = backgroundRect.anchoredPosition.y
             - backgroundRect.rect.height * backgroundRect.pivot.y;
         backgroundRect.pivot = new Vector2(backgroundRect.pivot.x, 0f);
         backgroundRect.anchoredPosition = new Vector2(backgroundRect.anchoredPosition.x, bottom);
+    }
+
+    private void EnsureBackgroundImage()
+    {
+        if (backgroundImage != null)
+            return;
+        if (backgroundRect != null)
+            backgroundImage = backgroundRect.GetComponent<Image>();
+        if (backgroundImage == null)
+            backgroundImage = GetComponentInChildren<Image>(true);
     }
 
     private void ResizeToContent(string content)
