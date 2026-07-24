@@ -36,6 +36,7 @@ public class VendingEventAnnouncer : MonoBehaviour
         {
             iconImage.sprite = icon;
             iconImage.enabled = icon != null;
+            iconImage.preserveAspect = true;
         }
 
         if (activeRoutine != null)

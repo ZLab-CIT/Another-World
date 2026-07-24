@@ -161,14 +161,6 @@ public class AgentPresentation2D : MonoBehaviour
             speechBubble.Hide();
     }
 
-    public void BeginActionPerformance(OfficeActionType actionType, string customLabel = "")
-    {
-    }
-
-    public void EndActionPerformance()
-    {
-    }
-
     public void AttachItemToHand(SceneItem item, Vector3 localOffset = default, Vector3 localScale = default, Quaternion localRot = default, float holdDuration = 0f)
     {
         ClearHeldItem();
@@ -177,7 +169,14 @@ public class AgentPresentation2D : MonoBehaviour
         heldItem = item.gameObject;
         heldItem.transform.SetParent(handAnchor, false);
         heldItem.transform.localPosition = localOffset;
-        heldItem.transform.localScale = localScale == default ? heldItem.transform.localScale : localScale;
+        if (localScale != default)
+        {
+            Vector3 parentLossy = handAnchor.lossyScale;
+            heldItem.transform.localScale = new Vector3(
+                parentLossy.x > 0 ? localScale.x / parentLossy.x : 1f,
+                parentLossy.y > 0 ? localScale.y / parentLossy.y : 1f,
+                parentLossy.z > 0 ? localScale.z / parentLossy.z : 1f);
+        }
         heldItem.transform.localRotation = localRot;
         heldItemExpiry = holdDuration > 0f ? Time.time + holdDuration : 0f;
 
@@ -197,9 +196,14 @@ public class AgentPresentation2D : MonoBehaviour
         if (heldItem == null || parent == null)
             return;
 
+        Vector3 worldScale = heldItem.transform.lossyScale;
         heldItem.transform.SetParent(parent, false);
         heldItem.transform.localPosition = localPosition;
-        heldItem.transform.localScale = Vector3.one;
+        Vector3 parentLossy = parent.lossyScale;
+        heldItem.transform.localScale = new Vector3(
+            parentLossy.x > 0 ? worldScale.x / parentLossy.x : 1f,
+            parentLossy.y > 0 ? worldScale.y / parentLossy.y : 1f,
+            parentLossy.z > 0 ? worldScale.z / parentLossy.z : 1f);
         heldItem.transform.localRotation = Quaternion.identity;
 
         if (heldItem.TryGetComponent<SpriteRenderer>(out var sr))

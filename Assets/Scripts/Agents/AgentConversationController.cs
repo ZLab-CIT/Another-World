@@ -669,9 +669,20 @@ public class AgentConversationController : MonoBehaviour
 
         if (initiator)
             return "The hardest part is deciding what to do next.";
-        return index % 2 == 0
-            ? "What makes that important right now?"
-            : "Tell me one part you want to change.";
+        string[] genericReplies =
+        {
+            "What makes that important right now?",
+            "Tell me one part you want to change.",
+            "How would you start doing that?",
+            "What stopped you before?",
+            "Do you think it is worth the effort?",
+            "What would happen if you did nothing?",
+            "When would you know it is working?",
+            "What is the first step?",
+            "Who else cares about this?",
+            "What surprised you about it?"
+        };
+        return genericReplies[index % genericReplies.Length];
     }
 
     private static string SpokenSubject(string topic)

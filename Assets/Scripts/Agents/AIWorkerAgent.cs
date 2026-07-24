@@ -314,7 +314,7 @@ public class AIWorkerAgent : MonoBehaviour
         return action != null && state == WorkerState.Acting && currentAction == action;
     }
 
-    private void RefreshActionPoints()
+    public void RefreshActionPoints()
     {
         actionPoints = FindObjectsOfType<OfficeActionPoint>();
     }
@@ -1139,7 +1139,6 @@ public class AIWorkerAgent : MonoBehaviour
             case OfficeActionType.Printer: return "check the printer";
             case OfficeActionType.Whiteboard: return "think at the whiteboard";
             case OfficeActionType.PlantCare: return "water the office plant";
-            case OfficeActionType.WindowBreak: return "take a window break";
             case OfficeActionType.WalkAround: return "walk around the office";
             case OfficeActionType.Think: return "pause to think";
             case OfficeActionType.CheckPhone: return "check your phone";
@@ -1361,8 +1360,6 @@ public class AIWorkerAgent : MonoBehaviour
         else if (currentActivity != null && currentActivity.targetAgent != null)
             presentation.SetFacing(currentActivity.targetAgent.GetPosition() - GetPosition());
 
-        presentation.EndActionPerformance();
-
         if (currentActivity != null
             && currentActivity.actionType == OfficeActionType.ApproachColleague
             && currentActivity.targetAgent != null)
@@ -1382,6 +1379,10 @@ public class AIWorkerAgent : MonoBehaviour
             VendingMachine machine = currentAction.GetComponent<VendingMachine>();
             if (machine != null)
                 machine.SpawnSnack();
+        }
+        else if (currentAction != null && currentAction.actionType == OfficeActionType.PlantCare)
+        {
+            ShowThought("taking care of the plant...");
         }
 
         conversation.OnStartedActing(currentAction);
@@ -1537,13 +1538,21 @@ public class AIWorkerAgent : MonoBehaviour
             reason = "respond to " + caller.DisplayName,
             customActionLabel = "talk with " + caller.DisplayName
         };
-        presentation.SetFacing(caller.GetPosition() - GetPosition());
         state = WorkerState.Acting;
         stateTimer = currentActivity.duration;
+        activityThoughtVisible = true;
+        StartCoroutine(GreetingResponseDelayed(caller));
+    }
+
+    private IEnumerator GreetingResponseDelayed(AIWorkerAgent caller)
+    {
+        yield return new WaitForSeconds(1.5f);
+        if (caller == null)
+            yield break;
+        presentation.SetFacing(caller.GetPosition() - GetPosition());
         string response = "Yes, " + caller.DisplayName + "?";
         Debug.Log("[Chat] " + DisplayName + ": " + response, this);
         ShowSpeech(DisplayName, response, new Color32(47, 133, 90, 255));
-        activityThoughtVisible = true;
     }
 
     private bool CanPauseForNearbyColleague(AIWorkerAgent caller)
@@ -1755,7 +1764,6 @@ public class AIWorkerAgent : MonoBehaviour
     private void ClearCurrentActivity()
     {
         crowd?.ClearDestination(this);
-        presentation?.EndActionPerformance();
         currentActivity = null;
         trackedActivityDeadline = 0f;
         nextTrackedTargetPlanTime = 0f;
@@ -1836,11 +1844,10 @@ public class AIWorkerAgent : MonoBehaviour
 
         if (AgentConversationController.IsSocialSpot(actionPoint.actionType))
         {
-            score -= 18f;
-            if (social > 45f)
-                score -= (social - 45f) * 0.8f;
+            if (social > 75f)
+                score -= (social - 75f) * 0.3f;
             if (conversation != null && conversation.IsSociallyCoolingDown)
-                score -= 80f;
+                score -= 40f;
         }
 
         if (actionPoint.CurrentUsers > 0 && actionPoint.actionType == OfficeActionType.ChatSpot)
@@ -1849,9 +1856,17 @@ public class AIWorkerAgent : MonoBehaviour
         if (actionPoint.actionType == OfficeActionType.VendingMachine)
         {
             float snackNeed = Mathf.Clamp01((100f - energy) / 100f);
-            score += 10f + snackNeed * 18f;
+            score += 6f + snackNeed * 12f;
             if (presentation != null && presentation.IsHolding)
                 score -= 12f;
+        }
+
+        if (actionPoint.actionType == OfficeActionType.CoffeeMachine)
+        {
+            float coffeeNeed = Mathf.Clamp01((100f - energy) / 100f);
+            score += 8f + coffeeNeed * 14f;
+            if (presentation != null && presentation.IsHolding)
+                score -= 10f;
         }
 
         if (actionPoint.actionType == OfficeActionType.WorkDesk)
@@ -1862,6 +1877,13 @@ public class AIWorkerAgent : MonoBehaviour
             if (energy < 25f) score -= 100f;
             if (focus < 25f) score -= 100f;
             if (social < 15f) score -= 50f;
+        }
+
+        if (actionPoint.actionType == OfficeActionType.PlantCare)
+        {
+            score += 6f + energyUrgency * 10f + socialUrgency * 5f;
+            if (actionPoint.CurrentUsers > 0)
+                score -= 15f;
         }
 
         return score;

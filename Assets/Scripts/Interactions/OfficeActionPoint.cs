@@ -13,7 +13,6 @@ public enum OfficeActionType
     Printer,
     Whiteboard,
     PlantCare,
-    WindowBreak,
     WalkAround,
     Think,
     CheckPhone,

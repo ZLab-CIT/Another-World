@@ -55,7 +55,7 @@ MonoBehaviour:
   - {fileID: 1496155705, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
   - {fileID: -1091413541, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
   dropLifetime: 4
-  dropScale: 0.65
+  dropScale: 0.1
   scope: 0
   nearbyRadius: 2
   energyChange: 8

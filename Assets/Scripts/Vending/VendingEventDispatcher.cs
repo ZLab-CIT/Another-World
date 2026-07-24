@@ -33,7 +33,6 @@ public class VendingEventDispatcher : MonoBehaviour
     private static Sprite cachedWhiteSprite;
 
     private VendingMachine vendingMachine;
-    private Sprite[] fallbackDropSprites;
     private readonly VendingEventCatalog catalog = new();
 
     public IReadOnlyList<VendingEventSO> Events => events;
@@ -256,6 +255,9 @@ public class VendingEventDispatcher : MonoBehaviour
         MakeDecorationOnly(furniture);
         furniture.name = "Furniture_" + socketId + "_" + evt.displayName;
 
+        if (evt.furnitureKind == UpgradeableFurnitureKind.Plant)
+            AddPlantActionPoint(furniture);
+
         FurnitureSocketItem marker = furniture.GetComponent<FurnitureSocketItem>();
         if (marker == null)
             marker = furniture.AddComponent<FurnitureSocketItem>();
@@ -268,6 +270,13 @@ public class VendingEventDispatcher : MonoBehaviour
         }
 
         HighlightWorldPosition(position, 3.5f);
+
+        if (evt.furnitureKind == UpgradeableFurnitureKind.Plant)
+        {
+            AIWorkerAgent[] agents = FindObjectsByType<AIWorkerAgent>(FindObjectsSortMode.None);
+            foreach (AIWorkerAgent agent in agents)
+                agent.RefreshActionPoints();
+        }
     }
 
     private Vector3 ResolveFurniturePosition(VendingFurnitureEventSO evt, List<AIWorkerAgent> targets, OfficeGrid2D grid)
@@ -423,6 +432,22 @@ public class VendingEventDispatcher : MonoBehaviour
             actionPoint.enabled = false;
     }
 
+    private static void AddPlantActionPoint(GameObject furniture)
+    {
+        OfficeActionPoint point = furniture.AddComponent<OfficeActionPoint>();
+        point.actionType = OfficeActionType.PlantCare;
+        point.useTime = 4f;
+        point.baseScore = 8f;
+        point.energyChange = 5f;
+        point.focusChange = 0f;
+        point.socialChange = 3f;
+        point.productivityChange = 0f;
+        point.slots = new List<OfficeActionSlot>
+        {
+            new OfficeActionSlot { offset = new Vector2(0f, -0.6f), facing = OfficeFacingDirection.Up }
+        };
+    }
+
     private static void ClearFurnitureSocket(string socketId)
     {
         if (string.IsNullOrEmpty(socketId))
@@ -525,63 +550,6 @@ public class VendingEventDispatcher : MonoBehaviour
         Vector3 world = cam.ViewportToWorldPoint(new Vector3(x, y, depth));
         world.z = 0f;
         return world;
-    }
-
-    private IEnumerator ConfettiBurst(Vector3 center, int count, float duration, Sprite sprite)
-    {
-        if (count <= 0 || duration <= 0f)
-            yield break;
-
-        if (sprite == null)
-            sprite = GetWhiteSprite();
-        List<GameObject> pieces = new(count);
-        Vector3[] velocities = new Vector3[count];
-
-        for (int i = 0; i < count; i++)
-        {
-            GameObject piece = new("Confetti");
-            piece.transform.position = center + (Vector3)Random.insideUnitCircle * Random.Range(0.15f, 1.1f);
-            piece.transform.localScale = new Vector3(Random.Range(0.08f, 0.2f), Random.Range(0.04f, 0.12f), 1f);
-            velocities[i] = new Vector3(Random.Range(-4.5f, 4.5f), Random.Range(2.5f, 7f), 0f);
-
-            SpriteRenderer sr = piece.AddComponent<SpriteRenderer>();
-            sr.sprite = sprite;
-            sr.color = Color.HSVToRGB(Random.value, 0.9f, 1f);
-            sr.sortingOrder = dropSortingOrder + 20;
-            pieces.Add(piece);
-        }
-
-        float t = 0f;
-        while (t < duration)
-        {
-            t += Time.deltaTime;
-            float alpha = 1f - (t / duration);
-            for (int i = 0; i < pieces.Count; i++)
-            {
-                GameObject piece = pieces[i];
-                if (piece == null)
-                    continue;
-
-                velocities[i].y += -8f * Time.deltaTime;
-                piece.transform.position += velocities[i] * Time.deltaTime;
-                piece.transform.Rotate(0f, 0f, 540f * Time.deltaTime * (i % 2 == 0 ? 1f : -1f));
-
-                SpriteRenderer sr = piece.GetComponent<SpriteRenderer>();
-                if (sr != null)
-                {
-                    Color c = sr.color;
-                    c.a = alpha;
-                    sr.color = c;
-                }
-            }
-            yield return null;
-        }
-
-        for (int i = 0; i < pieces.Count; i++)
-        {
-            if (pieces[i] != null)
-                Destroy(pieces[i]);
-        }
     }
 
     private VendingMachine GetVendingMachine()
@@ -741,41 +709,6 @@ public class VendingEventDispatcher : MonoBehaviour
 
         Sprite sprite = PickSprite(evt.dropSprites);
         return sprite != null ? sprite : evt.dropSprite;
-    }
-
-    private Sprite PickFallbackDropSprite()
-    {
-        if (fallbackDropSprites == null)
-        {
-            List<Sprite> pool = new();
-            if (events != null)
-            {
-                foreach (VendingEventSO candidate in events)
-                {
-                    if (candidate is not VendingBuffEventSO e)
-                        continue;
-
-                    if (e.dropSprites != null && e.dropSprites.Length > 0)
-                    {
-                        foreach (Sprite s in e.dropSprites)
-                        {
-                            if (s != null)
-                                pool.Add(s);
-                        }
-                        break;
-                    }
-
-                    if (e.dropSprite != null)
-                    {
-                        pool.Add(e.dropSprite);
-                        break;
-                    }
-                }
-            }
-            fallbackDropSprites = pool.ToArray();
-        }
-
-        return PickSprite(fallbackDropSprites);
     }
 
     private static Sprite PickSprite(Sprite[] sprites)

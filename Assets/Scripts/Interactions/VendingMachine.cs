@@ -6,7 +6,7 @@ using UnityEngine;
 public class VendingMachine : BaseDispenser
 {
     [SerializeField, Min(0f)] private float externalSnackLifetime = 5f;
-    [SerializeField, Min(0.01f)] private float handScaleMultiplier = 2.5f;
+    [SerializeField, Min(0.01f)] private float handScaleMultiplier = 1f;
     private VendingMachineAvatar avatar;
 
     private void Awake()
@@ -23,11 +23,8 @@ public class VendingMachine : BaseDispenser
         if (item == null)
             return Vector3.one;
 
-        Vector3 prefabScale = item.transform.localScale;
-        return new Vector3(
-            Mathf.Max(0.05f, prefabScale.x * handScaleMultiplier),
-            Mathf.Max(0.05f, prefabScale.y * handScaleMultiplier),
-            prefabScale.z);
+        Vector3 worldScale = item.transform.lossyScale;
+        return worldScale * handScaleMultiplier;
     }
 
     public override SceneItem Dispense(float? overrideLifetime = null)
