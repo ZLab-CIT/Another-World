@@ -4800,7 +4800,7 @@ MonoBehaviour:
   conversationScriptTimeoutSeconds: 30
   enableActivityPlans: 1
   activityBatchSize: 4
-  globalActivityPlanIntervalSeconds: 30
+  globalActivityPlanIntervalSeconds: 5
   activityPlanTimeoutSeconds: 30
   personalities: []
 --- !u!4 &966885347

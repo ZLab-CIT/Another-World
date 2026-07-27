@@ -119,6 +119,24 @@ public static class TextUtils
         return false;
     }
 
+    public static bool ClaimsUnavailableObjectHandling(string value)
+    {
+        if (!ContainsUnavailableObjectClaim(value))
+            return false;
+
+        string normalized = " " + NormalizeForComparison(value) + " ";
+        string[] handlingPhrases =
+        {
+            " get ", " fetch ", " bring ", " carry ", " give ", " hand ",
+            " deliver ", " buy ", " grab ", " pick up ", " serve ", " share ",
+            " hold ", " receive ", " eat "
+        };
+        foreach (string phrase in handlingPhrases)
+            if (normalized.Contains(phrase))
+                return true;
+        return false;
+    }
+
     public static ConversationParticipantContext FindParticipant(
         List<ConversationParticipantContext> participants, string displayName)
     {
@@ -202,67 +220,41 @@ public static class TextUtils
             return null;
         }
 
-        string s = raw.Trim();
-        if (s.StartsWith("```", StringComparison.Ordinal))
-        {
-            int firstNewline = s.IndexOf('\n');
-            if (firstNewline >= 0)
-                s = s.Substring(firstNewline + 1);
-            int fence = s.IndexOf("```", StringComparison.Ordinal);
-            if (fence >= 0)
-                s = s.Substring(0, fence);
-            s = s.Trim();
-        }
+        string s = raw.Trim().Trim('"', '\'', '\u201c', '\u201d', '\u2018', '\u2019').Trim();
 
-        bool hasUnclosedQuote = HasUnclosedDialogueQuote(s);
-
-        int firstQuote = s.IndexOf('"');
-        int lastQuote = s.LastIndexOf('"');
-        if (firstQuote >= 0 && lastQuote > firstQuote)
-            s = s.Substring(firstQuote + 1, lastQuote - firstQuote - 1).Trim();
-
-        s = SelectSpokenLine(s);
         if (string.IsNullOrWhiteSpace(s))
         {
-            rejectionReason = "no usable spoken line";
+            rejectionReason = "empty after trimming quotes";
             return null;
         }
 
         s = StripSpeakerLabels(s, speakerName, participants);
+        if (string.IsNullOrWhiteSpace(s))
+            return null;
+
         s = StripReplyLabel(s);
-        s = s?.Trim().Trim('"', '\'', '\u201c', '\u201d', '\u2018', '\u2019').Trim();
+        if (string.IsNullOrWhiteSpace(s))
+            return null;
+
         s = RemoveGenericAgreementOpening(s);
-        if (IsAssistantStyleReply(s) || IsNarratedReply(ref s, speakerName, participants))
+        if (string.IsNullOrWhiteSpace(s))
         {
+            rejectionReason = "only a generic agreement opener";
+            return null;
+        }
+
+        string mutableRef = s;
+        if (IsAssistantStyleReply(s) || IsNarratedReply(ref mutableRef, speakerName, participants))
+        {
+            s = mutableRef;
             rejectionReason = string.IsNullOrWhiteSpace(s)
                 ? "only a generic agreement opener"
                 : "assistant-style or narrated response";
             return null;
         }
+        s = mutableRef;
 
-        s = KeepCompleteThought(s, hasUnclosedQuote, out rejectionReason);
-
-        if (string.IsNullOrWhiteSpace(s))
-            return null;
-
-        return s;
-    }
-
-    public static string SelectSpokenLine(string text)
-    {
-        string[] lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-        foreach (string rawLine in lines)
-        {
-            string line = rawLine.Trim().TrimStart('-', '*').Trim();
-            line = StripReplyLabel(line);
-            if (string.IsNullOrWhiteSpace(line))
-                continue;
-            if (IsAssistantStyleReply(line))
-                return null;
-            return line;
-        }
-
-        return null;
+        return KeepCompleteThought(s, out rejectionReason);
     }
 
     public static string StripSpeakerLabels(string line, string speakerName, string participants)
@@ -312,15 +304,25 @@ public static class TextUtils
             return line.Trim();
 
         string prefix = line.Substring(0, colon).Trim().ToLowerInvariant();
-        bool isReplyLabel = prefix == "reply" || prefix == "response" || prefix == "answer"
-            || prefix == "assistant" || prefix == "spoken line"
-            || prefix == "content operator" || prefix == "designer" || prefix == "manager"
-            || prefix == "software developer" || prefix == "human resources specialist"
-            || prefix == "office assistant"
-            || prefix.Contains("character") || prefix.Contains("next reply")
-            || prefix.Contains("would say") || prefix.Contains("will say");
+        if (prefix.Length > 35 || prefix.Contains("  "))
+            return line.Trim();
 
-        return isReplyLabel ? line.Substring(colon + 1).Trim() : line.Trim();
+        string[] sentenceStarters = { "i ", "you ", "we ", "they ", "he ", "she ", "it ",
+            "the ", "this ", "that ", "these ", "those ", "my ", "your ", "his ", "her ",
+            "our ", "their ", "there ", "here ", "then ", "now ", "let " };
+
+        foreach (string starter in sentenceStarters)
+            if (prefix.StartsWith(starter))
+                return line.Trim();
+
+        string[] singleWordNatural = { "i", "you", "we", "they", "he", "she", "it",
+            "the", "this", "that" };
+
+        foreach (string word in singleWordNatural)
+            if (prefix == word)
+                return line.Trim();
+
+        return line.Substring(colon + 1).Trim();
     }
 
     public static string RemoveGenericAgreementOpening(string line)
@@ -361,20 +363,7 @@ public static class TextUtils
         return null;
     }
 
-    public static bool HasUnclosedDialogueQuote(string text)
-    {
-        int straightQuotes = 0;
-        foreach (char character in text)
-            if (character == '"')
-                straightQuotes++;
-
-        return straightQuotes % 2 != 0
-            || (text.IndexOf('\u201c') >= 0 && text.IndexOf('\u201d') < 0)
-            || (text.IndexOf('\u2018') >= 0 && text.IndexOf('\u2019') < 0);
-    }
-
-    public static string KeepCompleteThought(string line, bool hasUnclosedQuote,
-        out string rejectionReason)
+    public static string KeepCompleteThought(string line, out string rejectionReason)
     {
         rejectionReason = null;
         if (string.IsNullOrWhiteSpace(line))
@@ -382,21 +371,8 @@ public static class TextUtils
             rejectionReason = "empty line after cleanup";
             return null;
         }
-        if (hasUnclosedQuote)
-        {
-            rejectionReason = "generation ended inside a quotation";
-            return null;
-        }
 
         string value = line.Trim();
-        int lastTerminal = LastTerminalPunctuation(value);
-        if (lastTerminal >= 0 && lastTerminal < value.Length - 1)
-        {
-            string trailing = value.Substring(lastTerminal + 1).Trim(' ', '"', '\'', '\u201d', '\u2019');
-            if (trailing.Length > 0)
-                value = value.Substring(0, lastTerminal + 1).Trim();
-        }
-
         string[] words = value.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
         if (words.Length == 0)
         {
@@ -404,21 +380,11 @@ public static class TextUtils
             return null;
         }
 
-        if (words.Length > 30)
-        {
-            string shorterSentence = SelectLongestCompleteSentence(value);
-            if (!string.IsNullOrWhiteSpace(shorterSentence))
-            {
-                value = shorterSentence;
-                words = value.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-            }
-        }
-
         char finalCharacter = value[value.Length - 1];
         if (finalCharacter == '.' || finalCharacter == '!' || finalCharacter == '?')
             return value;
 
-        if (words.Length > 12)
+        if (words.Length > 30)
         {
             rejectionReason = "response ended without punctuation after " + words.Length + " words";
             return null;
@@ -430,40 +396,6 @@ public static class TextUtils
         }
 
         return value.TrimEnd(',', ';', ':', '-') + ".";
-    }
-
-    public static string SelectLongestCompleteSentence(string value)
-    {
-        string best = null;
-        int bestWordCount = 0;
-        int sentenceStart = 0;
-        for (int i = 0; i < value.Length; i++)
-        {
-            if (value[i] != '.' && value[i] != '!' && value[i] != '?')
-                continue;
-
-            string sentence = value.Substring(sentenceStart, i - sentenceStart + 1)
-                .Trim(' ', '"', '\'', '\u201c', '\u201d', '\u2018', '\u2019');
-            int wordCount = sentence.Split(new[] { ' ', '\t' },
-                StringSplitOptions.RemoveEmptyEntries).Length;
-            if (wordCount > bestWordCount)
-            {
-                best = sentence;
-                bestWordCount = wordCount;
-            }
-
-            sentenceStart = i + 1;
-        }
-
-        return best;
-    }
-
-    public static int LastTerminalPunctuation(string value)
-    {
-        for (int i = value.Length - 1; i >= 0; i--)
-            if (value[i] == '.' || value[i] == '!' || value[i] == '?')
-                return i;
-        return -1;
     }
 
     public static bool IsIncompleteFinalWord(string word)

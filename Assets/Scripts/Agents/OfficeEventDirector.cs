@@ -17,6 +17,7 @@ public class OfficeEventDirector : MonoBehaviour
     private readonly List<AIWorkerAgent> workers = new();
     private readonly HashSet<string> completedBirthdayEvents = new();
     private readonly HashSet<string> attemptedBirthdayEvents = new();
+    private readonly HashSet<string> completedBirthdayPreparations = new();
     private float nextCheckTime;
 
     private void Awake()
@@ -50,6 +51,28 @@ public class OfficeEventDirector : MonoBehaviour
     public void UnregisterWorker(AIWorkerAgent worker)
     {
         workers.Remove(worker);
+    }
+
+    public void NotifyBirthdayPreparationCompleted(AIWorkerAgent creator, Vector2 location,
+        string description)
+    {
+        if (creator == null || !IsBirthdayPreparation(description))
+            return;
+
+        AIWorkerAgent birthdayWorker = FindBirthdayWorker(false);
+        if (birthdayWorker == null || birthdayWorker == creator)
+            return;
+
+        string key = DateTime.Today.ToString("yyyy-MM-dd") + ":" + creator.AgentId + ":"
+            + (description ?? "").Trim().ToLowerInvariant();
+        if (!completedBirthdayPreparations.Add(key))
+            return;
+
+        string worldEvent = creator.DisplayName + " finished preparing a birthday surprise for "
+            + birthdayWorker.DisplayName + ".";
+        Debug.Log("[Birthday preparation completed] " + worldEvent, creator);
+        LLMBrainService.Instance?.RememberWorldEvent(worldEvent);
+        birthdayWorker.ReceivePreparedBirthdaySurprise(creator, location, description);
     }
 
     private void Update()
@@ -137,13 +160,14 @@ public class OfficeEventDirector : MonoBehaviour
             attemptedBirthdayEvents.Remove(eventKey);
     }
 
-    private AIWorkerAgent FindBirthdayWorker()
+    private AIWorkerAgent FindBirthdayWorker(bool requireAvailable = true)
     {
         foreach (AIWorkerAgent worker in workers)
         {
             if (worker == null || string.IsNullOrWhiteSpace(worker.Birthday))
                 continue;
-            if (worker.TryGetComponent(out AgentConversationController conversation)
+            if (requireAvailable
+                && worker.TryGetComponent(out AgentConversationController conversation)
                 && conversation.IsInConversation)
                 continue;
             if (IsToday(worker.Birthday))
@@ -151,6 +175,17 @@ public class OfficeEventDirector : MonoBehaviour
         }
 
         return null;
+    }
+
+    private static bool IsBirthdayPreparation(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)
+            || text.IndexOf("birthday", StringComparison.OrdinalIgnoreCase) < 0)
+            return false;
+
+        return text.IndexOf("gift", StringComparison.OrdinalIgnoreCase) >= 0
+            || text.IndexOf("surprise", StringComparison.OrdinalIgnoreCase) >= 0
+            || text.IndexOf("decorat", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static bool IsToday(string dateText)

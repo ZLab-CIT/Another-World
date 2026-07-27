@@ -13,7 +13,6 @@ MonoBehaviour:
   m_Name: SnacksSet
   m_EditorClassIdentifier: 
   sprites:
-  - {fileID: 943850889, guid: 70de415ca7c15e9479d8687d514145b8, type: 3}
   - {fileID: 1706385710, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
   - {fileID: -1006238096, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}
   - {fileID: -1845176046, guid: a8b0e2fa7d1e08043a46903b10a8d1fc, type: 3}

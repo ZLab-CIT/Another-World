@@ -31,20 +31,12 @@ public class LLMActivityPlanner
             return null;
 
         requestedCount = Mathf.Clamp(requestedCount, 2, 6);
-        OfficeActivityPlan commitmentPlan = BuildOpenCommitmentPlan(
+        List<OfficeActivityPlan> commitmentPlans = BuildOpenCommitmentPlans(
             profile, availableActions, coworkers);
-        if (commitmentPlan != null
-            && (TextUtils.ContainsIgnoreCase(commitmentPlan.socialMemorySubject, "coffee")
-                || TextUtils.ContainsIgnoreCase(commitmentPlan.socialMemorySubject, "drink")))
-            return SinglePlan(commitmentPlan);
 
         if (backend == null)
-            return SinglePlan(commitmentPlan);
+            return commitmentPlans;
 
-        if (brain.SocialRequestGate.CurrentCount == 0 || brain.PendingConversationScripts > 0)
-            return SinglePlan(commitmentPlan);
-
-        await brain.SocialRequestGate.WaitAsync();
         try
         {
             string who = TextUtils.DisplayName(profile, agentId);
@@ -70,7 +62,10 @@ public class LLMActivityPlanner
                     "ActionPoint means an exact object such as a desk, printer, or coffee machine. " +
                     "FreePosition means a reachable place in the office. CurrentPosition means no travel. " +
                     "FollowAgent means approach the named coworker's live position; use it only for ApproachColleague. " +
-                    "You may use Custom as actionType to invent a new custom action not tied to any scene object; set customActionLabel to a short description (e.g., \"stretch arms\", \"look out window\"). " +
+                    "If current state says phone call is due and PhoneCall is allowed, include exactly one PhoneCall unless an unresolved commitment needs the full batch. " +
+                    "Use PhoneCall for a brief personal call with someone outside the company; do not replace it with CheckPhone. " +
+                    "You may use Custom as actionType to invent a new custom action not tied to any scene object; set customActionLabel to a short description (e.g., \"look out window\", \"take a quiet breath\"). " +
+                    "Do not overuse stretching; choose it only when the character specifically needs a physical reset. " +
                     "Custom actions cannot create, fetch, carry, give, or transfer objects. Do not plan snacks, food, presents, birthday gifts, or other unavailable items unless the action is VendingMachine. " +
                     "Custom actions use FreePosition or CurrentPosition as destinationMode. " +
                     "Optionally set energyChange, focusChange, socialChange, productivityChange (negative to decrease, positive to increase, default 0) to describe need effects. " +
@@ -89,9 +84,9 @@ public class LLMActivityPlanner
                     (string.IsNullOrWhiteSpace(coworkerNames)
                         ? "No coworkers are currently available, so do not choose ApproachColleague. "
                         : "For ApproachColleague, targetAgent must be exactly one of: " + coworkerNames + ". ") +
-                    "Use ApproachColleague when asking that coworker for advice, help, or a discussion. For ApproachColleague, thought must be the exact short sentence spoken on arrival, not an internal thought. " +
+                    "Use ApproachColleague when asking that coworker for advice, help, or a discussion. For ApproachColleague, thought must be the exact complete short sentence spoken on arrival, not an internal thought. " +
                     "durationSeconds must be between 2 and 30. " +
-                    "reason is 3 to 14 words. thought is an optional short in-character thought, 0 to 12 words."),
+                    "reason is 3 to 14 words. thought is optional, complete, and 0 to 10 words for private thoughts or 4 to 12 words for ApproachColleague openings."),
                 new ChatMessage("user", context.ToString())
             };
 
@@ -110,66 +105,70 @@ public class LLMActivityPlanner
             string raw = await backend.CompleteAsync(messages, options);
             List<OfficeActivityPlan> plans = ParseActivityPlans(
                 raw, availableActions, coworkers, requestedCount, profile);
-            plans = PrependCommitment(plans, commitmentPlan, requestedCount);
-            if (commitmentPlan != null && plans != null && plans.Count > 0)
-            {
-                OfficeActivityPlan selectedCommitment = plans[0];
-                bool modelSelected = !ReferenceEquals(selectedCommitment, commitmentPlan);
-                Debug.Log("[Social commitment plan] " + who + ": " +
-                    (modelSelected ? "model chose " : "fallback chose ") +
-                    selectedCommitment.actionType +
-                    (string.IsNullOrWhiteSpace(selectedCommitment.targetAgent)
-                        ? "" : " with " + selectedCommitment.targetAgent));
-            }
+            plans = PrependCommitment(plans, commitmentPlans, requestedCount);
             if ((plans == null || plans.Count == 0) && !string.IsNullOrWhiteSpace(raw))
                 Debug.LogWarning("[Activity batch rejected] " + who +
                     ": no valid available activities");
-            else if (plans != null && plans.Count > 0)
-                Debug.Log("[Activity batch] " + who + ": accepted " + plans.Count +
-                    " queued activities");
             return plans;
         }
         catch (Exception exception)
         {
             Debug.LogWarning(nameof(LLMBrainService) + " activity planning failed for " +
                 agentId + ": " + exception.Message);
-            return SinglePlan(commitmentPlan);
+            return commitmentPlans;
         }
-        finally
-        {
-            brain.SocialRequestGate.Release();
-        }
-    }
-
-    private static List<OfficeActivityPlan> SinglePlan(OfficeActivityPlan plan)
-    {
-        return plan == null ? null : new List<OfficeActivityPlan> { plan };
     }
 
     private static List<OfficeActivityPlan> PrependCommitment(List<OfficeActivityPlan> plans,
-        OfficeActivityPlan commitment, int capacity)
+        List<OfficeActivityPlan> commitments, int capacity)
     {
-        if (commitment == null)
+        if (commitments == null || commitments.Count == 0)
             return plans;
         plans ??= new List<OfficeActivityPlan>();
         for (int i = 0; i < plans.Count; i++)
         {
             if (plans[i] == null || string.IsNullOrWhiteSpace(plans[i].socialMemorySubject))
                 continue;
-            OfficeActivityPlan generatedCommitment = plans[i];
-            plans.RemoveAt(i);
-            plans.Insert(0, generatedCommitment);
+
+            string seqId = plans[i].sequenceId;
+            int takeStart = i;
+            int takeEnd = i + 1;
+            if (!string.IsNullOrWhiteSpace(seqId))
+            {
+                while (takeStart > 0 && string.Equals(plans[takeStart - 1]?.sequenceId, seqId,
+                    StringComparison.OrdinalIgnoreCase))
+                    takeStart--;
+                while (takeEnd < plans.Count && string.Equals(plans[takeEnd]?.sequenceId, seqId,
+                    StringComparison.OrdinalIgnoreCase))
+                    takeEnd++;
+            }
+
+            List<OfficeActivityPlan> taken = new();
+            for (int j = takeStart; j < takeEnd; j++)
+                taken.Add(plans[j]);
+            for (int j = takeEnd - 1; j >= takeStart; j--)
+                plans.RemoveAt(j);
+            for (int j = taken.Count - 1; j >= 0; j--)
+                plans.Insert(0, taken[j]);
+
             while (plans.Count > Mathf.Max(1, capacity))
                 plans.RemoveAt(plans.Count - 1);
             return plans;
         }
-        plans.Insert(0, commitment);
+        Debug.Log("[Commitment plan] fallback queued " + commitments.Count +
+            " activity(ies) for commitment: " + commitments[0].socialMemorySubject);
+        int insertIndex = 0;
+        foreach (OfficeActivityPlan plan in commitments)
+        {
+            plans.Insert(insertIndex, plan);
+            insertIndex++;
+        }
         while (plans.Count > Mathf.Max(1, capacity))
             plans.RemoveAt(plans.Count - 1);
         return plans;
     }
 
-    private static OfficeActivityPlan BuildOpenCommitmentPlan(AgentProfile profile,
+    private static List<OfficeActivityPlan> BuildOpenCommitmentPlans(AgentProfile profile,
         List<OfficeActionType> availableActions, List<ConversationParticipantContext> coworkers)
     {
         string actor = TextUtils.DisplayName(profile, profile.agentId);
@@ -198,21 +197,107 @@ public class LLMActivityPlanner
                         ? OfficeActionType.ChatSpot : null;
                 if (!socialType.HasValue)
                     continue;
-                return new OfficeActivityPlan
+                Debug.Log("[Social commitment] " + actor + " fulfilling invitation: " +
+                    entry.subject);
+                return new List<OfficeActivityPlan>
                 {
-                    actionType = socialType.Value,
-                    destinationMode = OfficeDestinationMode.ActionPoint,
-                    targetAgent = target.displayName,
-                    durationSeconds = 8f,
-                    reason = "follow through on the invitation",
-                    thought = "I should keep that invitation.",
-                    socialMemorySubject = entry.subject,
-                    completesSocialCommitment = true
+                    new OfficeActivityPlan
+                    {
+                        actionType = socialType.Value,
+                        destinationMode = OfficeDestinationMode.ActionPoint,
+                        targetAgent = target.displayName,
+                        durationSeconds = 8f,
+                        reason = "follow through on the invitation",
+                        thought = "I should keep that invitation.",
+                        socialMemorySubject = entry.subject,
+                        completesSocialCommitment = true
+                    }
                 };
             }
 
             if (entry.type == "promise" || entry.type == "favor_request" || entry.type == "plan")
             {
+                if (IsBirthdayPreparation(entry.subject))
+                {
+                    Debug.Log("[Social commitment] " + actor
+                        + " preparing birthday surprise: " + entry.subject);
+                    return new List<OfficeActivityPlan>
+                    {
+                        new OfficeActivityPlan
+                        {
+                            actionType = OfficeActionType.Custom,
+                            destinationMode = OfficeDestinationMode.FreePosition,
+                            destinationHint = "Lounge",
+                            durationSeconds = 6f,
+                            reason = "prepare the birthday surprise",
+                            thought = "I hope they enjoy what we prepared.",
+                            customActionLabel = "prepare birthday surprise",
+                            focusChange = 1f,
+                            socialChange = 2f,
+                            socialMemorySubject = entry.subject,
+                            completesSocialCommitment = true
+                        }
+                    };
+                }
+
+                bool snackDelivery = TextUtils.ContainsIgnoreCase(entry.subject, "snack");
+                if (snackDelivery)
+                {
+                    ConversationParticipantContext target =
+                        TextUtils.FindParticipant(coworkers, entry.targetAgent);
+                    if (target == null
+                        || !availableActions.Contains(OfficeActionType.ApproachColleague))
+                        continue;
+
+                    AIWorkerAgent actorAgent = FindLiveAgent(actor);
+                    if (actorAgent != null && actorAgent.HeldItemKind == SceneItemKind.Snack)
+                    {
+                        Debug.Log("[Social commitment] " + actor + " delivering snack: " +
+                            entry.subject);
+                        return new List<OfficeActivityPlan>
+                        {
+                            BuildItemDeliveryApproach(entry, target, "snack")
+                        };
+                    }
+                    if (!availableActions.Contains(OfficeActionType.VendingMachine))
+                        continue;
+
+                    string sequenceId = "snack-delivery";
+                    string objective = "bring a snack to " + target.displayName;
+                    Debug.Log("[Social commitment] " + actor + " getting a snack for: " +
+                        entry.subject);
+                    return new List<OfficeActivityPlan>
+                    {
+                        new OfficeActivityPlan
+                        {
+                            actionType = OfficeActionType.VendingMachine,
+                            destinationMode = OfficeDestinationMode.ActionPoint,
+                            sequenceId = sequenceId,
+                            sequenceStep = 1,
+                            objective = objective,
+                            durationSeconds = 3f,
+                            reason = "get the promised snack",
+                            thought = "I promised to bring a snack.",
+                            socialMemorySubject = entry.subject,
+                            completesSocialCommitment = false
+                        },
+                        new OfficeActivityPlan
+                        {
+                            actionType = OfficeActionType.ApproachColleague,
+                            destinationMode = OfficeDestinationMode.FollowAgent,
+                            targetAgent = target.displayName,
+                            sequenceId = sequenceId,
+                            sequenceStep = 2,
+                            objective = objective,
+                            durationSeconds = 2f,
+                            reason = "deliver the promised snack",
+                            thought = "I should deliver this snack.",
+                            socialMemorySubject = entry.subject,
+                            completesSocialCommitment = true
+                        }
+                    };
+                }
+
                 bool coffeeDelivery = TextUtils.ContainsIgnoreCase(entry.subject, "coffee")
                     || TextUtils.ContainsIgnoreCase(entry.subject, "drink");
                 if (coffeeDelivery)
@@ -221,31 +306,41 @@ public class LLMActivityPlanner
                     if (target == null)
                         continue;
                     AIWorkerAgent actorAgent = FindLiveAgent(actor);
-                    if (actorAgent != null && actorAgent.IsHolding)
+                    if (actorAgent != null && actorAgent.HeldItemKind == SceneItemKind.Coffee)
                     {
-                        return new OfficeActivityPlan
+                        Debug.Log("[Social commitment] " + actor + " delivering: " +
+                            entry.subject);
+                        return new List<OfficeActivityPlan>
                         {
-                            actionType = OfficeActionType.ApproachColleague,
-                            destinationMode = OfficeDestinationMode.FollowAgent,
-                            targetAgent = target.displayName,
-                            durationSeconds = 2f,
-                            reason = "deliver the promised coffee",
-                            thought = "I should deliver this coffee.",
-                            socialMemorySubject = entry.subject,
-                            completesSocialCommitment = true
+                            new OfficeActivityPlan
+                            {
+                                actionType = OfficeActionType.ApproachColleague,
+                                destinationMode = OfficeDestinationMode.FollowAgent,
+                                targetAgent = target.displayName,
+                                durationSeconds = 2f,
+                                reason = "deliver the promised coffee",
+                                thought = "I should deliver this coffee.",
+                                socialMemorySubject = entry.subject,
+                                completesSocialCommitment = true
+                            }
                         };
                     }
                     if (!availableActions.Contains(OfficeActionType.CoffeeMachine))
                         continue;
-                    return new OfficeActivityPlan
+                    Debug.Log("[Social commitment] " + actor + " getting coffee for: " +
+                        entry.subject);
+                    return new List<OfficeActivityPlan>
                     {
-                        actionType = OfficeActionType.CoffeeMachine,
-                        destinationMode = OfficeDestinationMode.ActionPoint,
-                        durationSeconds = 3f,
-                        reason = "get the promised coffee",
-                        thought = "I promised to bring coffee.",
-                        socialMemorySubject = entry.subject,
-                        completesSocialCommitment = false
+                        new OfficeActivityPlan
+                        {
+                            actionType = OfficeActionType.CoffeeMachine,
+                            destinationMode = OfficeDestinationMode.ActionPoint,
+                            durationSeconds = 3f,
+                            reason = "get the promised coffee",
+                            thought = "I promised to bring coffee.",
+                            socialMemorySubject = entry.subject,
+                            completesSocialCommitment = false
+                        }
                     };
                 }
                 if (TextUtils.ContainsUnavailableObjectClaim(entry.subject))
@@ -256,21 +351,42 @@ public class LLMActivityPlanner
                 ConversationParticipantContext counterpart = TextUtils.FindParticipant(coworkers, counterpartName);
                 if (counterpart == null || !availableActions.Contains(OfficeActionType.ApproachColleague))
                     continue;
-                return new OfficeActivityPlan
+                Debug.Log("[Social commitment] " + actor + " approaching " +
+                    counterpart.displayName + " about: " + entry.subject);
+                return new List<OfficeActivityPlan>
                 {
-                    actionType = OfficeActionType.ApproachColleague,
-                    destinationMode = OfficeDestinationMode.FollowAgent,
-                    targetAgent = counterpart.displayName,
-                    durationSeconds = 5f,
-                    reason = entry.subject,
-                    thought = counterpart.displayName + ", can we handle what we discussed?",
-                    socialChange = 2f,
-                    socialMemorySubject = entry.subject,
-                    completesSocialCommitment = true
+                    new OfficeActivityPlan
+                    {
+                        actionType = OfficeActionType.ApproachColleague,
+                        destinationMode = OfficeDestinationMode.FollowAgent,
+                        targetAgent = counterpart.displayName,
+                        durationSeconds = 5f,
+                        reason = entry.subject,
+                        thought = counterpart.displayName + ", can we handle what we discussed?",
+                        socialChange = 2f,
+                        socialMemorySubject = entry.subject,
+                        completesSocialCommitment = true
+                    }
                 };
             }
         }
         return null;
+    }
+
+    private static OfficeActivityPlan BuildItemDeliveryApproach(
+        SocialMemoryEntry entry, ConversationParticipantContext target, string itemName)
+    {
+        return new OfficeActivityPlan
+        {
+            actionType = OfficeActionType.ApproachColleague,
+            destinationMode = OfficeDestinationMode.FollowAgent,
+            targetAgent = target.displayName,
+            durationSeconds = 2f,
+            reason = "deliver the promised " + itemName,
+            thought = "I should deliver this " + itemName + ".",
+            socialMemorySubject = entry.subject,
+            completesSocialCommitment = true
+        };
     }
 
     private static AIWorkerAgent FindLiveAgent(string displayName)
@@ -346,7 +462,7 @@ public class LLMActivityPlanner
             actionType = OfficeActionType.Custom;
             string customDescription = (dto.customActionLabel ?? "") + " "
                 + (dto.reason ?? "") + " " + (dto.thought ?? "");
-            if (TextUtils.ContainsUnavailableObjectClaim(customDescription))
+            if (TextUtils.ClaimsUnavailableObjectHandling(customDescription))
             {
                 Debug.LogWarning("[Activity rejected] " + TextUtils.DisplayName(profile, profile.agentId)
                     + ": unavailable object action: " + customDescription.Trim());
@@ -394,7 +510,11 @@ public class LLMActivityPlanner
                 && destinationMode == OfficeDestinationMode.FollowAgent
                 && string.Equals(targetAgent, counterpartName,
                     StringComparison.OrdinalIgnoreCase);
-            if (!validInteraction)
+            bool validBirthdayPreparation = IsBirthdayPreparation(commitment.subject)
+                && actionType == OfficeActionType.Custom
+                && (destinationMode == OfficeDestinationMode.FreePosition
+                    || destinationMode == OfficeDestinationMode.CurrentPosition);
+            if (!validInteraction && !validBirthdayPreparation)
             {
                 Debug.LogWarning("[Commitment action rejected] "
                     + TextUtils.DisplayName(profile, profile.agentId) + ": action did not physically fulfill: "
@@ -414,7 +534,8 @@ public class LLMActivityPlanner
             targetAgent = targetAgent,
             durationSeconds = Mathf.Clamp(dto.durationSeconds <= 0f ? 5f : dto.durationSeconds, 2f, 30f),
             reason = TextUtils.CleanShortText(dto.reason, 14),
-            thought = TextUtils.CleanShortText(dto.thought, 12),
+            thought = CleanActivityThought(dto.thought, actionType,
+                TextUtils.JoinParticipantNames(coworkers)),
             customActionLabel = TextUtils.CleanShortText(dto.customActionLabel, 24),
             energyChange = dto.energyChange,
             focusChange = dto.focusChange,
@@ -425,6 +546,96 @@ public class LLMActivityPlanner
             socialOpeningLine = commitment != null && socialAction
                 ? TextUtils.CleanShortText(dto.socialOpeningLine, 20) : ""
         };
+    }
+
+    private static bool IsBirthdayPreparation(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)
+            || !TextUtils.ContainsIgnoreCase(text, "birthday"))
+            return false;
+        return TextUtils.ContainsIgnoreCase(text, "gift")
+            || TextUtils.ContainsIgnoreCase(text, "surprise")
+            || TextUtils.ContainsIgnoreCase(text, "decorat");
+    }
+
+    private static string CleanActivityThought(string raw, OfficeActionType actionType,
+        string participantNames)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return "";
+
+        string line = raw.Trim().Trim('"', '\'', '\u201c', '\u201d', '\u2018', '\u2019').Trim();
+        if (string.IsNullOrWhiteSpace(line))
+            return "";
+
+        line = TextUtils.StripSpeakerLabels(line, "", participantNames);
+        line = TextUtils.StripReplyLabel(line);
+        if (string.IsNullOrWhiteSpace(line))
+            return "";
+
+        if (TextUtils.IsAssistantStyleReply(line))
+            return "";
+
+        string lower = line.Trim().ToLowerInvariant();
+        if (!EndsWithSentencePunctuation(line) && LooksLikeQuestion(lower))
+            line = line.TrimEnd(',', ';', ':', '-') + "?";
+
+        string complete = TextUtils.KeepCompleteThought(line, out _);
+        if (string.IsNullOrWhiteSpace(complete))
+            return "";
+
+        int maxWords = actionType == OfficeActionType.ApproachColleague ? 12 : 10;
+        int words = TextUtils.CountWords(complete);
+        if (words == 0 || words > maxWords)
+            return "";
+
+        if (actionType == OfficeActionType.ApproachColleague
+            && EndsWithIncompleteRequest(lower))
+            return "";
+
+        return complete;
+    }
+
+    private static bool EndsWithSentencePunctuation(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+        char final = line.TrimEnd()[line.TrimEnd().Length - 1];
+        return final == '.' || final == '!' || final == '?';
+    }
+
+    private static bool LooksLikeQuestion(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+        string[] openers =
+        {
+            "what ", "why ", "how ", "when ", "where ", "who ",
+            "do ", "does ", "did ", "can ", "could ", "would ", "will ",
+            "should ", "is ", "are ", "have ", "has "
+        };
+        foreach (string opener in openers)
+            if (lower.StartsWith(opener, StringComparison.Ordinal))
+                return true;
+        return lower.Contains(" can you ") || lower.Contains(" could you ")
+            || lower.Contains(" would you ");
+    }
+
+    private static bool EndsWithIncompleteRequest(string lower)
+    {
+        if (string.IsNullOrWhiteSpace(lower))
+            return false;
+        string value = lower.Trim().TrimEnd('.', '!', '?', ',', ';', ':');
+        string[] endings =
+        {
+            "can you share", "could you share", "would you share",
+            "can you explain", "could you explain", "would you explain",
+            "can you help", "could you help", "would you help"
+        };
+        foreach (string ending in endings)
+            if (value.EndsWith(ending, StringComparison.Ordinal))
+                return true;
+        return false;
     }
 
     private static void NormalizeActivitySequences(List<OfficeActivityPlan> plans)

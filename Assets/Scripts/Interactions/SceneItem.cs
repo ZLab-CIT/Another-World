@@ -1,10 +1,18 @@
 using UnityEngine;
 
+public enum SceneItemKind
+{
+    Unknown,
+    Coffee,
+    Snack
+}
+
 [RequireComponent(typeof(SpriteRenderer))]
 public class SceneItem : MonoBehaviour
 {
     private SpriteRenderer sr;
     private Coroutine scheduledDestroyRoutine;
+    public SceneItemKind Kind { get; private set; }
 
     private void Awake()
     {
@@ -17,6 +25,11 @@ public class SceneItem : MonoBehaviour
         {
             sr.sprite = sprite;
         }
+    }
+
+    public void SetKind(SceneItemKind kind)
+    {
+        Kind = kind;
     }
 
     public void ScheduleDestroy(float delay)

@@ -15,10 +15,10 @@ public class AgentConversationController : MonoBehaviour
 
     [SerializeField, Min(0.1f)] private float participantRadius = 1.5f;
     [SerializeField, Min(0.5f)] private float conversationSeparationRadius = 2.25f;
-    [SerializeField, Min(1)] private int maxTurns = 7;
-    [SerializeField, Min(0.5f)] private float minimumLineSeconds = 2.2f;
-    [SerializeField, Min(0.5f)] private float maximumLineSeconds = 4.5f;
-    [SerializeField, Min(0f)] private float betweenTurnsSeconds = 0.2f;
+    [SerializeField, Min(1)] private int maxTurns = 5;
+    [SerializeField, Min(0.5f)] private float minimumLineSeconds = 3.4f;
+    [SerializeField, Min(0.5f)] private float maximumLineSeconds = 6.2f;
+    [SerializeField, Min(0f)] private float betweenTurnsSeconds = 1.6f;
 
     private readonly Dictionary<string, int> affinity = new();
     private AIWorkerAgent owner;
@@ -474,9 +474,9 @@ public class AgentConversationController : MonoBehaviour
             owner.ApplyEffects(0f, 0f, 5f, 0f);
 
             contexts = BuildParticipantContexts(speakers);
-            int replyCount = Mathf.Clamp(maxTurns - 1, 1, 6);
+            int replyCount = Mathf.Clamp(maxTurns - 1, 1, 4);
             if (speakers.Count > 2)
-                replyCount = Mathf.Max(replyCount, Mathf.Min(6, speakers.Count - 1));
+                replyCount = Mathf.Max(replyCount, Mathf.Min(4, speakers.Count - 1));
 
             List<string> speakerOrder = BuildSpeakerOrder(speakers, intendedPartnerName,
                 replyCount, topic, openerLine);
@@ -484,11 +484,8 @@ public class AgentConversationController : MonoBehaviour
                 ? brain.GenerateConversationAsync(contexts, owner.DisplayName, openerLine, topic, speakerOrder)
                 : null;
             ConversationScript script = scriptTask != null ? await scriptTask : null;
-            List<ConversationTurn> generated = script?.turns;
-            if (generated == null)
-                generated = BuildFallbackTurns(speakerOrder, openerLine, topic);
-            else if (generated.Count < speakerOrder.Count)
-                CompletePartialTurns(generated, speakerOrder, owner.DisplayName, topic);
+            List<ConversationTurn> generated = MergeGeneratedTurns(
+                script?.turns, speakerOrder, openerLine, topic);
 
             foreach (ConversationTurn turn in generated)
             {
@@ -599,18 +596,18 @@ public class AgentConversationController : MonoBehaviour
 
         string[] templates =
         {
-            "For " + subject + ", I need one concrete example.",
-            "I would test " + subject + " on a small scale first.",
-            "The hard part of " + subject + " is maintaining it.",
-            "I like " + subject + " if it avoids extra chores.",
-            "My practical answer about " + subject + " is still cautious.",
-            "Who benefits most from " + subject + " right now?",
-            "I think " + subject + " could get complicated later.",
-            "For " + subject + ", the consequences matter most.",
-            "I would ask who maintains " + subject + " afterward.",
-            "The useful part of " + subject + " needs to be clear.",
-            "What part of " + subject + " would we change first?",
-            "I support " + subject + " if people actually notice it."
+            "I see what you mean.",
+            "That sounds reasonable to me.",
+            "I had not thought about it that way.",
+            "The practical details will matter.",
+            "We can start small and see how it goes.",
+            "That gives us something useful to work with.",
+            "I think we are getting closer to an answer.",
+            "It would help to keep the plan simple.",
+            "That seems worth trying.",
+            "I can work with that idea.",
+            "Let us think through the next step.",
+            "That clears up the main concern for me."
         };
 
         int offset = ConversationTemplateOffset(subject, speakerOrder);
@@ -642,6 +639,73 @@ public class AgentConversationController : MonoBehaviour
             string line = BuildPartialReply(speaker, initiator, index, topic);
             turns.Add(new ConversationTurn { speaker = speaker, line = line });
         }
+    }
+
+    private static List<ConversationTurn> MergeGeneratedTurns(
+        List<ConversationTurn> generated, List<string> speakerOrder,
+        string openingLine, string topic)
+    {
+        List<ConversationTurn> fallbacks = null;
+        List<ConversationTurn> merged = new();
+        for (int i = 0; i < speakerOrder.Count; i++)
+        {
+            ConversationTurn candidate = generated != null && i < generated.Count
+                ? generated[i] : null;
+            bool valid = candidate != null
+                && !string.IsNullOrWhiteSpace(candidate.line)
+                && string.Equals(candidate.speaker, speakerOrder[i],
+                    StringComparison.OrdinalIgnoreCase);
+            if (valid)
+            {
+                merged.Add(candidate);
+                continue;
+            }
+
+            if (i == speakerOrder.Count - 1)
+            {
+                merged.Add(new ConversationTurn
+                {
+                    speaker = speakerOrder[i],
+                    line = BuildClosingReply(speakerOrder[i], i, topic)
+                });
+                continue;
+            }
+
+            fallbacks ??= BuildFallbackTurns(speakerOrder, openingLine, topic);
+            if (i < fallbacks.Count)
+                merged.Add(fallbacks[i]);
+            else
+                merged.Add(new ConversationTurn
+                {
+                    speaker = speakerOrder[i],
+                    line = BuildPartialReply(speakerOrder[i], false, i, topic)
+                });
+        }
+        return merged;
+    }
+
+    private static string BuildClosingReply(string speaker, int index, string topic)
+    {
+        if (IsBirthdayTopic(topic))
+            return "I am glad we got to celebrate this together.";
+        if (ContainsIgnoreCase(topic, "coffee") || ContainsIgnoreCase(topic, "drink"))
+            return "Let's try that and see how it goes.";
+        if (ContainsIgnoreCase(topic, "advice") || ContainsIgnoreCase(topic, "opinion"))
+            return "That gives me something useful to think about.";
+        if (ContainsIgnoreCase(topic, "game") || ContainsIgnoreCase(topic, "program"))
+            return "Let's continue working through those ideas later.";
+        if (ContainsIgnoreCase(topic, "design") || ContainsIgnoreCase(topic, "color"))
+            return "I think we have a useful direction now.";
+
+        string[] closings =
+        {
+            "That sounds like a good place to leave it for now.",
+            "I think we understand each other better now.",
+            "Let's pick this up again after we get some work done.",
+            "I am glad we had a chance to talk about it."
+        };
+        int offset = ((speaker ?? "").GetHashCode() + index) & int.MaxValue;
+        return closings[offset % closings.Length];
     }
 
     private static string BuildPartialReply(string speaker, bool initiator, int index, string topic)
@@ -934,7 +998,7 @@ public class AgentConversationController : MonoBehaviour
         HideAll(speakers);
         speaker.ShowSpeech(speaker.DisplayName, line, GetSpeakerColor(speaker));
 
-        float seconds = Mathf.Clamp(1.4f + line.Length * 0.055f, minimumLineSeconds, maximumLineSeconds);
+        float seconds = Mathf.Clamp(2.4f + line.Length * 0.095f, minimumLineSeconds, maximumLineSeconds);
         await Task.Delay(Mathf.RoundToInt(seconds * 1000f));
         speaker.HideSpeech();
         if (betweenTurnsSeconds > 0f)

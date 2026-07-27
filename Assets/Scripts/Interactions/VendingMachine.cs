@@ -30,6 +30,7 @@ public class VendingMachine : BaseDispenser
     public override SceneItem Dispense(float? overrideLifetime = null)
     {
         SceneItem item = base.Dispense(overrideLifetime);
+        item?.SetKind(SceneItemKind.Snack);
 
         if (item != null && avatar != null)
         {

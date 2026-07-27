@@ -243,6 +243,8 @@ public class AgentPresentation2D : MonoBehaviour
         return released.GetComponent<SceneItem>();
     }
 
+    public SceneItem HeldItem => heldItem != null ? heldItem.GetComponent<SceneItem>() : null;
+
     private void ApplyHeldItemSorting(SpriteRenderer sr)
     {
         SpriteRenderer bodyRenderer = VisualRoot.GetComponentInChildren<SpriteRenderer>();

@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -123,9 +122,9 @@ public class LLMBrainService : MonoBehaviour
     [Header("Activity Planning")]
     [Tooltip("If on, the model generates short queues of office activities. Unity still validates every target and path when each activity starts.")]
     [SerializeField] private bool enableActivityPlans = true;
-    [SerializeField, Range(2, 6)] private int activityBatchSize = 4;
-    [Tooltip("Minimum time between activity-batch requests across every worker in the office.")]
-    [SerializeField, Min(5f)] private float globalActivityPlanIntervalSeconds = 30f;
+    [SerializeField, Range(2, 6)] private int activityBatchSize = 3;
+    [Tooltip("Minimum time between activity-batch requests across every worker in the office. A longer pause reduces token bursts on CPU-hosted models.")]
+    [SerializeField, Min(2f)] private float globalActivityPlanIntervalSeconds = 12f;
     [SerializeField, Min(10)] private int activityPlanTimeoutSeconds = 30;
 
     [Header("Agent Personalities")]
@@ -138,8 +137,6 @@ public class LLMBrainService : MonoBehaviour
     private readonly List<string> recentGlobalUtterances = new();
     private readonly HashSet<string> announcedBirthdays = new();
     private readonly List<string> pendingActivityRequesters = new();
-    private readonly SemaphoreSlim socialRequestGate = new(1, 1);
-    internal int pendingConversationScripts;
     private bool loggedMissingApiKey;
     private float nextGlobalActivityPlanTime;
 
@@ -150,8 +147,6 @@ public class LLMBrainService : MonoBehaviour
     internal List<string> WorldEvents => worldEvents;
     internal List<string> RecentGlobalTopics => recentGlobalTopics;
     internal List<string> RecentGlobalUtterances => recentGlobalUtterances;
-    internal SemaphoreSlim SocialRequestGate => socialRequestGate;
-    internal int PendingConversationScripts => pendingConversationScripts;
 
     public static LLMBrainService Ensure()
     {
@@ -172,18 +167,24 @@ public class LLMBrainService : MonoBehaviour
 
         Instance = this;
         string resolvedApiKey = ResolveApiKey();
-        if (RequiresApiKey() && string.IsNullOrWhiteSpace(resolvedApiKey))
+        bool backendReady = !RequiresApiKey() || !string.IsNullOrWhiteSpace(resolvedApiKey);
+        if (backendReady)
+        {
+            backend = new OpenAICompatibleBackend(baseUrl, resolvedApiKey, model);
+        }
+        else
         {
             LogMissingApiKey();
             backend = null;
         }
-        else
-        {
-            backend = new OpenAICompatibleBackend(baseUrl, resolvedApiKey, model);
-        }
 
         conversationPlanner = new LLMConversationPlanner(this, backend);
         activityPlanner = new LLMActivityPlanner(this, backend);
+
+        Debug.Log("[LLMBrainService] backend=" + (backendReady ? model : "NONE (missing API key)")
+            + " | enableSocialReplies=" + enableSocialReplies
+            + " | enableGeneratedConversationPlans=" + enableGeneratedConversationPlans
+            + " | enableActivityPlans=" + enableActivityPlans, this);
 
         if (personalities != null)
         {
@@ -239,14 +240,12 @@ public class LLMBrainService : MonoBehaviour
         if (pendingActivityRequesters.Count == 0
             || !string.Equals(pendingActivityRequesters[0], requester,
                 StringComparison.OrdinalIgnoreCase)
-            || pendingConversationScripts > 0
-            || socialRequestGate.CurrentCount == 0
             || Time.unscaledTime < nextGlobalActivityPlanTime)
             return false;
 
         pendingActivityRequesters.RemoveAt(0);
         nextGlobalActivityPlanTime = Time.unscaledTime
-            + Mathf.Max(5f, globalActivityPlanIntervalSeconds);
+            + Mathf.Max(2f, globalActivityPlanIntervalSeconds);
         return true;
     }
 
@@ -312,6 +311,14 @@ public class LLMBrainService : MonoBehaviour
             participants, openingSpeaker, openingLine, topic, speakerOrder,
             Mathf.Max(2, memoryLines), temperature, requestTimeoutSeconds,
             conversationScriptTimeoutSeconds);
+    }
+
+    public async Task<List<string>> GenerateEventMonologueAsync(
+        string agentId, string purpose, string context, int lineCount)
+    {
+        return await conversationPlanner.GenerateEventMonologueAsync(
+            agentId, purpose, context, lineCount, Mathf.Max(2, memoryLines),
+            temperature, requestTimeoutSeconds, conversationScriptTimeoutSeconds);
     }
 
     public bool IsFreshOpening(string agentId, string line)

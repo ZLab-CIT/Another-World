@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -31,10 +30,6 @@ public class LLMConversationPlanner
         if (backend == null || profile == null || coworkers == null || coworkers.Count == 0)
             return null;
 
-        if (brain.SocialRequestGate.CurrentCount == 0 || brain.PendingConversationScripts > 0)
-            return null;
-
-        await brain.SocialRequestGate.WaitAsync();
         try
         {
             string who = TextUtils.DisplayName(profile, agentId);
@@ -93,28 +88,36 @@ public class LLMConversationPlanner
                 maxRetries = 1,
                 retryBaseDelaySeconds = 1.5f
             };
-            string raw = await backend.CompleteAsync(messages, options);
-            ConversationPlan plan = ParseConversationPlan(raw);
-            string rejection = ValidateConversationPlan(plan, profile, coworkers, who,
-                candidateNames, out ConversationPlan validated);
-            if (rejection != null)
+            const int maxPlanAttempts = 2;
+            for (int attempt = 0; attempt < maxPlanAttempts; attempt++)
             {
-                if (!string.IsNullOrWhiteSpace(raw))
-                    Debug.LogWarning("[Conversation plan rejected] " + who + ": " + rejection);
-                return null;
+                string raw = await backend.CompleteAsync(messages, options);
+                ConversationPlan plan = ParseConversationPlan(raw);
+                string rejection = ValidateConversationPlan(plan, profile, coworkers, who,
+                    candidateNames, out ConversationPlan validated);
+                if (rejection != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(raw))
+                        Debug.LogWarning("[Conversation plan rejected] " + who + ": " + rejection);
+                    if (attempt < maxPlanAttempts - 1)
+                    {
+                        messages.Add(new ChatMessage("user",
+                            "Your previous plan was rejected: " + rejection +
+                            ". Choose a different coworker, a more distinct subject, or a different opening angle."));
+                        await Task.Delay(500);
+                        continue;
+                    }
+                    return null;
+                }
+                return validated;
             }
-
-            return validated;
+            return null;
         }
         catch (Exception exception)
         {
             Debug.LogWarning(nameof(LLMBrainService) + " conversation planning failed for " +
                 agentId + ": " + exception.Message);
             return null;
-        }
-        finally
-        {
-            brain.SocialRequestGate.Release();
         }
     }
 
@@ -133,8 +136,6 @@ public class LLMConversationPlanner
             || speakerOrder == null || speakerOrder.Count == 0)
             return null;
 
-        Interlocked.Increment(ref brain.pendingConversationScripts);
-        await brain.SocialRequestGate.WaitAsync();
         try
         {
             string names = TextUtils.JoinParticipantNames(participants);
@@ -168,80 +169,50 @@ public class LLMConversationPlanner
             StringBuilder order = new();
             for (int i = 0; i < speakerOrder.Count; i++)
             {
-                order.Append("reply").Append(i + 1).Append(" is spoken by ")
-                    .Append(speakerOrder[i]).AppendLine(".");
+                order.Append(i + 1).Append(". ").Append(speakerOrder[i]).AppendLine();
             }
-            string replyKeys = TextUtils.BuildReplyKeyList(speakerOrder.Count);
 
             List<ChatMessage> messages = new()
             {
                 new ChatMessage("system",
-                    "Continue one natural face-to-face workplace conversation. Each reply value is spoken by the assigned " +
-                    "character. This short exchange has one subject only. Do not introduce a new topic, story, plan, invitation, " +
-                    "or unrelated question. Each line must directly react to the immediately previous line and must mention either " +
-                    "the established subject or one concrete detail from that previous line. Keep the same people and facts, and " +
-                    "sound distinctively like that character. Use at least one specific profile detail, interest, relationship, " +
-                    "memory, job detail, or speech-style cue across the replies; avoid reusable workplace filler. " +
-                    "Use simple everyday spoken English and contractions. Let people answer, " +
-                    "add a concrete detail, tease, hesitate, or disagree when appropriate; they must not merely praise or agree. " +
-                    "Each line must express one clear idea in one sentence. Prefer common words a child or new English learner can understand. " +
-                    "Avoid metaphors, abstract advice, corporate language, semicolons, and long explanations. " +
-                    "Characters may offer to bring coffee, because they can physically fetch and deliver it. A vending machine can dispense a snack for the actor to hold locally. Do not offer snacks, food, gifts, or other unavailable objects unless the action is VendingMachine. " +
-                    "Do not claim someone brought, carries, owns, gives, or received an object unless the opening line explicitly establishes that physical object. " +
+                    "Write the complete continuation of one natural face-to-face workplace conversation. " +
+                    "Return one turn for every speaker in the assigned order. Keep the exchange broadly on the established subject, " +
+                    "but allow natural reactions, questions, pronouns, thanks, jokes, hesitation, and disagreement. " +
+                    "Keep the same people and established facts, and make each character sound like their profile. " +
+                    "Use simple everyday spoken English. Prefer one short sentence per turn and avoid long explanations. " +
+                    "Characters may naturally mention ordinary off-screen objects, food, hobbies, and places that enrich the imagined office world. " +
                     "A private social memory belongs only to the named character until they choose to say it aloud. " +
-                    "Every reply value must be non-empty and use 3 to 12 words. Do not invent shared history, switch roles, narrate actions, use speaker labels " +
-                    "inside a line, mention AI, or repeat wording. Do not end every line with a question. " +
-                    "If the opening already congratulated someone, do not repeat the exact phrase happy birthday; add a personal wish, thanks, joke, or gift reaction instead. " +
+                    "Do not invent shared history, switch roles, narrate actions, or mention AI. " +
+                    "The final turn must close the exchange with a statement, acknowledgment, decision, or farewell. The final turn must not end with a question. " +
                     "Also extract up to two explicit social events stated in the conversation. Allowed event types are secret, gossip, promise, favor_request, favor_done, plan, and invitation. " +
                     "Do not infer an event from ordinary chat. For each event, speaker and target must be character names, subject must be a short concrete fact or commitment, and private is true only when it was presented as confidential. " +
-                    "Return an empty socialEvents array when there is no explicit event. Return only JSON with these reply keys: " + replyKeys +
-                    ", plus socialEvents:[{type:string,speaker:string,target:string,subject:string,private:bool}]."),
+                    "Return an empty socialEvents array when there is no explicit event. Return only JSON in this form: " +
+                    "{\"turns\":[{\"speaker\":string,\"line\":string}],\"socialEvents\":[{\"type\":string,\"speaker\":string,\"target\":string,\"subject\":string,\"private\":bool}]}." +
+                    " The turns array must have exactly " + speakerOrder.Count + " entries in the assigned order."),
                 new ChatMessage("user",
                     cast + "Conversation fact: " + openingSpeaker + " initiated this subject and said the opening line. " +
                     "Do not transfer " + openingSpeaker + "'s actions or memories to somebody else.\n" +
                     "Established subject: " + topic + "\n" + openingSpeaker + " said: \"" + openingLine +
-                    "\"\nReply assignments:\n" + order)
+                    "\"\nSpeaker order for the remaining dialogue:\n" + order)
             };
 
             LLMOptions options = new()
             {
                 requestLabel = "ConversationScript",
                 temperature = Mathf.Clamp(temperature, 0.55f, 0.72f),
-                maxTokens = Mathf.Clamp(56 * speakerOrder.Count + 100, 220, 440),
+                maxTokens = Mathf.Clamp(42 * speakerOrder.Count + 60, 180, 260),
                 jsonMode = true,
                 structuredSchema = LLMJsonSchema.ConversationScript,
-                timeoutSeconds = Mathf.Min(requestTimeoutSeconds, conversationScriptTimeoutSeconds)
+                timeoutSeconds = Mathf.Min(requestTimeoutSeconds, conversationScriptTimeoutSeconds),
+                maxRetries = 0
             };
 
-            const int maxAttempts = 3;
-            for (int attempt = 0; attempt < maxAttempts; attempt++)
-            {
-                string raw = await backend.CompleteAsync(messages, options);
-                ConversationScript script = ParseAndValidateConversationScript(raw, participants,
-                    speakerOrder, openingSpeaker, openingLine, topic, names, out string rejection);
-
-                if (script != null && string.IsNullOrWhiteSpace(rejection))
-                    return script;
-
-                if (!string.IsNullOrWhiteSpace(rejection))
-                    Debug.LogWarning("[Conversation script " + (script == null ? "rejected" : "partial")
-                        + " attempt " + (attempt + 1) + "/" + maxAttempts + "] " + names + ": " + rejection);
-
-                if (script != null)
-                    return script;
-
-                if (attempt < maxAttempts - 1)
-                {
-                    if (!string.IsNullOrWhiteSpace(rejection))
-                        messages.Add(new ChatMessage("user",
-                            "Your previous response was rejected: " + rejection +
-                            ". Please regenerate all reply values keeping every line strictly on the established subject. " +
-                            "Each line must share at least one concrete keyword with the topic or the previous line."));
-                    await System.Threading.Tasks.Task.Delay(500);
-                }
-            }
-
-            return null;
+            string raw = await backend.CompleteAsync(messages, options);
+            ConversationScript script = ParseConversationScript(raw, participants,
+                speakerOrder, openingSpeaker, openingLine, names, out string repairSummary);
+            if (!string.IsNullOrWhiteSpace(repairSummary))
+                Debug.LogWarning("[Conversation script repaired] " + names + ": " + repairSummary);
+            return script;
         }
         catch (Exception exception)
         {
@@ -249,10 +220,89 @@ public class LLMConversationPlanner
                 exception.Message);
             return null;
         }
-        finally
+    }
+
+    public async Task<List<string>> GenerateEventMonologueAsync(
+        string agentId,
+        string purpose,
+        string eventContext,
+        int lineCount,
+        int memoryLines,
+        float temperature,
+        int requestTimeoutSeconds,
+        int conversationScriptTimeoutSeconds)
+    {
+        AgentProfile profile = brain.GetProfile(agentId);
+        if (backend == null || profile == null)
+            return null;
+
+        lineCount = Mathf.Clamp(lineCount, 1, 4);
+        string who = TextUtils.DisplayName(profile, agentId);
+        StringBuilder context = new();
+        if (!string.IsNullOrWhiteSpace(eventContext))
+            context.AppendLine(eventContext.Trim());
+        TextUtils.AppendRecentMemory(context, profile, Mathf.Max(2, memoryLines));
+        TextUtils.AppendSocialMemory(context, profile, Mathf.Max(2, memoryLines));
+        TextUtils.AppendWorldEvents(context, brain.WorldEvents, 3);
+
+        try
         {
-            brain.SocialRequestGate.Release();
-            Interlocked.Decrement(ref brain.pendingConversationScripts);
+            List<ChatMessage> messages = new()
+            {
+                new ChatMessage("system",
+                    "Write a complete short in-game speech sequence for one character. You are "
+                    + who + ". " + profile.personality + " Purpose: " + purpose + ". "
+                    + "Use natural everyday English that fits the character and current event. "
+                    + "Each line must be one concise sentence with one clear idea. "
+                    + "Do not narrate actions, mention AI, or speak for another visible office character. "
+                    + "The final line must close naturally and must not be a question. "
+                    + "Return only JSON in this form: "
+                    + "{\"turns\":[{\"speaker\":string,\"line\":string}],\"socialEvents\":[]}. "
+                    + "The turns array must contain exactly " + lineCount
+                    + " entries and every speaker must be exactly \"" + who + "\"."),
+                new ChatMessage("user", context.ToString())
+            };
+            LLMOptions options = new()
+            {
+                requestLabel = "EventSpeech:" + who,
+                temperature = Mathf.Clamp(temperature, 0.6f, 0.78f),
+                maxTokens = Mathf.Clamp(40 * lineCount + 40, 120, 180),
+                jsonMode = true,
+                structuredSchema = LLMJsonSchema.ConversationScript,
+                timeoutSeconds = Mathf.Min(12, Mathf.Min(requestTimeoutSeconds,
+                    conversationScriptTimeoutSeconds)),
+                maxRetries = 0
+            };
+
+            string raw = await backend.CompleteAsync(messages, options);
+            string json = TextUtils.ExtractJson(raw);
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+
+            ConversationScriptDTO script = JsonUtility.FromJson<ConversationScriptDTO>(json);
+            if (script?.turns == null || script.turns.Length != lineCount)
+                return null;
+
+            List<string> lines = new();
+            foreach (ConversationTurnDTO turn in script.turns)
+            {
+                if (turn == null || !string.Equals(turn.speaker?.Trim(), who,
+                        StringComparison.OrdinalIgnoreCase))
+                    return null;
+                string line = TextUtils.CleanShortText(turn.line, 24);
+                if (string.IsNullOrWhiteSpace(line))
+                    return null;
+                lines.Add(line);
+            }
+            if (lines.Count == 0 || IsQuestionLine(lines[lines.Count - 1]))
+                return null;
+            return lines;
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning(nameof(LLMBrainService) + " event speech failed for "
+                + who + ": " + exception.Message);
+            return null;
         }
     }
 
@@ -499,16 +549,16 @@ public class LLMConversationPlanner
         return null;
     }
 
-    private ConversationScript ParseAndValidateConversationScript(string raw,
+    private ConversationScript ParseConversationScript(string raw,
         List<ConversationParticipantContext> participants, List<string> speakerOrder,
-        string openingSpeaker, string openingLine, string topic, string participantNames,
-        out string rejection)
+        string openingSpeaker, string openingLine, string participantNames,
+        out string repairSummary)
     {
-        rejection = null;
+        repairSummary = null;
         string json = TextUtils.ExtractJson(raw);
         if (string.IsNullOrWhiteSpace(json))
         {
-            rejection = "empty or non-JSON response";
+            repairSummary = "empty or non-JSON response; using local dialogue";
             return null;
         }
 
@@ -519,81 +569,133 @@ public class LLMConversationPlanner
         }
         catch
         {
-            rejection = "invalid JSON";
+            repairSummary = "invalid JSON; using local dialogue";
             return null;
         }
 
-        if (script == null)
+        if (script == null || script.turns == null)
         {
-            rejection = "script contained no turns";
+            repairSummary = "response contained no turns; using local dialogue";
             return null;
         }
 
-        List<ConversationTurn> accepted = new();
-        ConversationThreadState thread = new(topic, openingLine);
-        List<string> lines = new() { openingLine };
-        string[] generatedLines =
+        List<ConversationTurn> turns = new();
+        List<string> repairs = new();
+        HashSet<string> conversationLines = new()
         {
-            script.reply1,
-            script.reply2,
-            script.reply3,
-            script.reply4,
-            script.reply5,
-            script.reply6
+            TextUtils.NormalizeForComparison(openingLine)
         };
-        int count = Mathf.Min(generatedLines.Length, speakerOrder.Count);
-        for (int i = 0; i < count; i++)
+        for (int i = 0; i < speakerOrder.Count; i++)
         {
             string expectedSpeaker = speakerOrder[i];
-            string line = TextUtils.CleanReply(generatedLines[i], expectedSpeaker, participantNames,
-                out string lineRejection);
-            ConversationParticipantContext participant = TextUtils.FindParticipant(participants, expectedSpeaker);
-            AgentProfile profile = participant != null ? brain.GetProfile(participant.agentId) : null;
-            if (string.IsNullOrWhiteSpace(line))
+            ConversationTurnDTO rawTurn = i < script.turns.Length ? script.turns[i] : null;
+            string line = null;
+            if (rawTurn == null)
             {
-                rejection = "turn " + (i + 1) + " was unusable: " + lineRejection;
-                return accepted.Count > 0
-                    ? BuildConversationScript(accepted, null, participants,
-                        openingSpeaker, openingLine)
-                    : null;
+                repairs.Add("turn " + (i + 1) + " was missing");
             }
-            if (TextUtils.IsSimilarToAny(line, lines, 0.8f)
-                || (profile != null && TextUtils.IsSimilarToAny(line, profile.recentUtterances, 0.78f)))
+            else if (TextUtils.FindParticipant(participants, rawTurn.speaker) == null
+                || !string.Equals(rawTurn.speaker?.Trim(), expectedSpeaker,
+                    StringComparison.OrdinalIgnoreCase))
             {
-                rejection = "turn " + (i + 1) + " repeated a recent line";
-                return accepted.Count > 0
-                    ? BuildConversationScript(accepted, null, participants,
-                        openingSpeaker, openingLine)
-                    : null;
+                repairs.Add("turn " + (i + 1) + " had the wrong speaker");
             }
-            if (TextUtils.IsSimilarToAny(line, brain.RecentGlobalUtterances, 0.82f))
+            else
             {
-                rejection = "turn " + (i + 1) + " repeated a line recently heard elsewhere";
-                return accepted.Count > 0
-                    ? BuildConversationScript(accepted, null, participants,
-                        openingSpeaker, openingLine)
-                    : null;
-            }
-            if (!thread.TryAccept(line))
-            {
-                rejection = "turn " + (i + 1) + " changed to an unrelated subject";
-                return accepted.Count > 0
-                    ? BuildConversationScript(accepted, null, participants,
-                        openingSpeaker, openingLine)
-                    : null;
+                line = CleanGeneratedTurn(rawTurn.line, expectedSpeaker, participantNames,
+                    out string lineRejection);
+                if (string.IsNullOrWhiteSpace(line))
+                    repairs.Add("turn " + (i + 1) + " was unusable: " + lineRejection);
+                else
+                {
+                    ConversationParticipantContext participant =
+                        TextUtils.FindParticipant(participants, expectedSpeaker);
+                    AgentProfile profile = participant != null
+                        ? brain.GetProfile(participant.agentId) : null;
+                    string normalized = TextUtils.NormalizeForComparison(line);
+                    bool exactRepeat = conversationLines.Contains(normalized)
+                        || IsExactRecentLine(normalized, profile?.recentUtterances)
+                        || IsExactRecentLine(normalized, brain.RecentGlobalUtterances);
+                    if (exactRepeat)
+                    {
+                        repairs.Add("turn " + (i + 1) + " exactly repeated a recent line");
+                        line = null;
+                    }
+                    else if (i == speakerOrder.Count - 1 && IsQuestionLine(line))
+                    {
+                        repairs.Add("final turn ended with a question");
+                        line = null;
+                    }
+                    else
+                    {
+                        conversationLines.Add(normalized);
+                    }
+                }
             }
 
-            accepted.Add(new ConversationTurn { speaker = expectedSpeaker, line = line });
-            lines.Add(line);
+            turns.Add(new ConversationTurn { speaker = expectedSpeaker, line = line });
         }
 
-        if (accepted.Count == 0)
+        if (script.turns.Length != speakerOrder.Count)
+            repairs.Add("expected " + speakerOrder.Count + " turns but received " + script.turns.Length);
+        repairSummary = repairs.Count > 0 ? string.Join("; ", repairs) : null;
+        return BuildConversationScript(turns, script.socialEvents, participants,
+            openingSpeaker, openingLine);
+    }
+
+    private static bool IsExactRecentLine(string normalized, List<string> recentLines)
+    {
+        if (string.IsNullOrWhiteSpace(normalized) || recentLines == null)
+            return false;
+        foreach (string recent in recentLines)
+            if (string.Equals(normalized, TextUtils.NormalizeForComparison(recent),
+                    StringComparison.Ordinal))
+                return true;
+        return false;
+    }
+
+    private static bool IsQuestionLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+        if (line.TrimEnd().EndsWith("?", StringComparison.Ordinal))
+            return true;
+
+        string normalized = TextUtils.NormalizeForComparison(line);
+        string[] questionOpeners =
         {
-            rejection = "script had no valid turns";
+            "what ", "why ", "how ", "when ", "where ", "who ",
+            "do ", "does ", "did ", "can ", "could ", "would ", "will ",
+            "should ", "is ", "are ", "have ", "has "
+        };
+        foreach (string opener in questionOpeners)
+            if (normalized.StartsWith(opener, StringComparison.Ordinal))
+                return true;
+        return false;
+    }
+
+    private static string CleanGeneratedTurn(string raw, string speakerName,
+        string participantNames, out string rejection)
+    {
+        rejection = null;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            rejection = "empty line";
             return null;
         }
-        return BuildConversationScript(accepted, script.socialEvents, participants,
-            openingSpeaker, openingLine);
+
+        string line = raw.Trim().Trim('"', '\'', '\u201c', '\u201d', '\u2018', '\u2019').Trim();
+        line = TextUtils.StripSpeakerLabels(line, speakerName, participantNames);
+        line = TextUtils.StripReplyLabel(line);
+        string spokenLine = line;
+        if (TextUtils.IsAssistantStyleReply(line)
+            || TextUtils.IsNarratedReply(ref spokenLine, speakerName, participantNames))
+        {
+            rejection = "assistant-style or narrated line";
+            return null;
+        }
+
+        return TextUtils.KeepCompleteThought(spokenLine, out rejection);
     }
 
     private static ConversationScript BuildConversationScript(List<ConversationTurn> turns,
@@ -606,9 +708,10 @@ public class LLMConversationPlanner
             return result;
 
         StringBuilder transcript = new();
-        transcript.Append(openingSpeaker).Append(": ").Append(openingLine).Append(' ');
+        transcript.Append(openingSpeaker).Append(": ").AppendLine(openingLine);
         foreach (ConversationTurn turn in turns)
-            transcript.Append(turn.speaker).Append(": ").Append(turn.line).Append(' ');
+            if (turn != null && !string.IsNullOrWhiteSpace(turn.line))
+                transcript.Append(turn.speaker).Append(": ").AppendLine(turn.line);
 
         int count = Mathf.Min(2, rawEvents.Length);
         for (int i = 0; i < count; i++)
@@ -640,6 +743,12 @@ public class LLMConversationPlanner
         ConversationParticipantContext target = TextUtils.FindParticipant(participants, raw.target);
         if (source == null || (!string.IsNullOrWhiteSpace(raw.target) && target == null))
             return null;
+        if (target != null && string.Equals(source.displayName, target.displayName,
+                StringComparison.OrdinalIgnoreCase))
+            return null;
+        if (type == "favor_request"
+            && !HasExplicitRequestFromSpeaker(transcript, source.displayName))
+            return null;
 
         string subject = raw.subject.Replace('\r', ' ').Replace('\n', ' ').Trim();
         int words = TextUtils.CountWords(subject);
@@ -659,76 +768,29 @@ public class LLMConversationPlanner
         };
     }
 
-    private sealed class ConversationThreadState
+    private static bool HasExplicitRequestFromSpeaker(string transcript, string speaker)
     {
-        private readonly HashSet<string> subjectAnchors;
-        private readonly HashSet<string> topicKeywords;
-        private HashSet<string> previousAnchors;
-
-        public ConversationThreadState(string topic, string openingLine)
-        {
-            subjectAnchors = TextUtils.MeaningfulWords(TextUtils.NormalizeForComparison(
-                (topic ?? "") + " " + (openingLine ?? "")));
-            topicKeywords = TextUtils.MeaningfulWords(TextUtils.NormalizeForComparison(topic));
-            previousAnchors = TextUtils.MeaningfulWords(TextUtils.NormalizeForComparison(openingLine));
-        }
-
-        public bool TryAccept(string line)
-        {
-            string normalized = TextUtils.NormalizeForComparison(line);
-            if (StartsNewSubject(normalized))
-                return false;
-
-            HashSet<string> lineAnchors = TextUtils.MeaningfulWords(normalized);
-            bool anchored = lineAnchors.Overlaps(subjectAnchors)
-                || lineAnchors.Overlaps(previousAnchors)
-                || lineAnchors.Overlaps(topicKeywords)
-                || IsDirectReaction(normalized)
-                || IsOnTopicQuestion(normalized);
-            if (!anchored)
-                return false;
-
-            previousAnchors = lineAnchors;
-            return true;
-        }
-
-        private static bool StartsNewSubject(string line)
-        {
-            string[] starters =
-            {
-                "by the way", "speaking of something else", "on another topic",
-                "anyway have you", "forget that"
-            };
-            foreach (string starter in starters)
-                if (line.StartsWith(starter, StringComparison.Ordinal))
-                    return true;
+        if (string.IsNullOrWhiteSpace(transcript) || string.IsNullOrWhiteSpace(speaker))
             return false;
-        }
 
-        private static bool IsDirectReaction(string line)
+        string prefix = speaker.Trim() + ":";
+        string[] requestPhrases =
         {
-            string[] reactions =
-            {
-                "that sounds", "tell me more", "why do you", "i agree", "i disagree",
-                "you are right", "good idea", "bad idea", "what happened next",
-                "how do you", "what about", "have you tried", "do you think",
-                "would you", "could you", "should we", "what if",
-                "yes", "no", "exactly", "maybe", "really", "thank you", "thanks",
-                "oh", "wow", "hmm", "wait", "so", "well", "right"
-            };
-            foreach (string reaction in reactions)
-                if (line.StartsWith(reaction, StringComparison.Ordinal))
+            "can you", "could you", "would you", "will you", "please",
+            "i need you", "help me", "do me a favor"
+        };
+        foreach (string rawLine in transcript.Split(
+                     new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string line = rawLine.Trim();
+            if (!line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+            string spoken = line.Substring(prefix.Length).Trim().ToLowerInvariant();
+            foreach (string phrase in requestPhrases)
+                if (spoken.Contains(phrase))
                     return true;
-            return false;
         }
-
-        private static bool IsOnTopicQuestion(string line)
-        {
-            if (!line.EndsWith("?", StringComparison.Ordinal))
-                return false;
-            int wordCount = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries).Length;
-            return wordCount >= 3 && wordCount <= 14;
-        }
+        return false;
     }
 
     [Serializable]
@@ -742,13 +804,15 @@ public class LLMConversationPlanner
     [Serializable]
     private class ConversationScriptDTO
     {
-        public string reply1;
-        public string reply2;
-        public string reply3;
-        public string reply4;
-        public string reply5;
-        public string reply6;
+        public ConversationTurnDTO[] turns;
         public SocialEventDTO[] socialEvents;
+    }
+
+    [Serializable]
+    private class ConversationTurnDTO
+    {
+        public string speaker;
+        public string line;
     }
 
     [Serializable]
