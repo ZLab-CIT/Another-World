@@ -116,7 +116,10 @@ public class OfficeActionPoint : MonoBehaviour
         int slot = agent != null && reservedSlots.TryGetValue(agent, out int reservedSlot)
             ? reservedSlot
             : 0;
-        return FacingToVector(slots[slot].facing);
+        OfficeFacingDirection direction = slots != null && slot >= 0 && slot < slots.Count
+            ? slots[slot].facing
+            : OfficeFacingDirection.Down;
+        return FacingToVector(direction);
     }
 
     public void ApplyTo(AIWorkerAgent agent)

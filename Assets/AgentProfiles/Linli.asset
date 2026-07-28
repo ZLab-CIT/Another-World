@@ -36,12 +36,10 @@ MonoBehaviour:
   - Linli once finished an entire week's schedule early and used the spare hour to watch basketball highlights.
   - A coffee stain on a favorite suit taught Linli never to carry an uncovered cup into a meeting.
   - Linli keeps a private list of meetings that could have been two sentences.
-  conversationStarters:
-  - "{name}, quick question: are we actually finishing early today?"
-  - "{name}, this office needs a basketball break more than another meeting."
-  - "{name}, I finished my tasks and developed one opinion about everyone's time management."
-  - "{name}, I just attended a meeting that should have been a message."
-  - "{name}, settle this: is a coffee stain on a suit a crisis or character development?"
-  - "{name}, the game last night was better organized than our calendar."
-  - "{name}, I have ten free minutes and no intention of filling them responsibly."
-  - "{name}, which task would you quietly remove if nobody could stop you?"
+  actionPreferences:
+  - actionType: 0
+    scoreModifier: 7
+  - actionType: 5
+    scoreModifier: 3
+  - actionType: 4
+    scoreModifier: -3

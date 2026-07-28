@@ -8,6 +8,7 @@ MonoBehaviour:
   eventId: hydration
   displayName: Hydration
   description: Sustained calm focus for everyone.
+  characterReaction: The entire office somehow remembered to drink water.
   scope: 2
   focusChange: 15
   energyDecayMultiplier: 0.5

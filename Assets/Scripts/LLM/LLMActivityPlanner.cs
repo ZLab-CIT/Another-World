@@ -7,12 +7,10 @@ using UnityEngine;
 public class LLMActivityPlanner
 {
     private readonly LLMBrainService brain;
-    private readonly ILLMBackend backend;
 
-    public LLMActivityPlanner(LLMBrainService brain, ILLMBackend backend)
+    public LLMActivityPlanner(LLMBrainService brain)
     {
         this.brain = brain;
-        this.backend = backend;
     }
 
     public async Task<List<OfficeActivityPlan>> PlanActivityBatchAsync(
@@ -33,8 +31,9 @@ public class LLMActivityPlanner
         requestedCount = Mathf.Clamp(requestedCount, 2, 6);
         List<OfficeActivityPlan> commitmentPlans = BuildOpenCommitmentPlans(
             profile, availableActions, coworkers);
+        ILLMBackend activeBackend = brain.GetBackendForAgent(agentId);
 
-        if (backend == null)
+        if (activeBackend == null)
             return commitmentPlans;
 
         try
@@ -45,48 +44,47 @@ public class LLMActivityPlanner
             StringBuilder context = new();
             if (!string.IsNullOrWhiteSpace(currentState))
                 context.Append("Current state: ").Append(currentState.Trim()).AppendLine();
-            TextUtils.AppendRecentMemory(context, profile, Mathf.Max(2, memoryLines));
-            TextUtils.AppendSocialMemory(context, profile, Mathf.Max(2, memoryLines));
-            TextUtils.AppendWorldEvents(context, brain.WorldEvents, 3);
+            if (coworkers != null)
+            {
+                foreach (ConversationParticipantContext coworker in coworkers)
+                {
+                    if (coworker == null || string.IsNullOrWhiteSpace(coworker.displayName))
+                        continue;
+                    context.Append("Coworker ").Append(coworker.displayName).Append(": ")
+                        .Append(string.IsNullOrWhiteSpace(coworker.currentState)
+                            ? "state unknown" : coworker.currentState.Trim()).AppendLine();
+                }
+            }
+            TextUtils.AppendRecentMemory(context, profile, 1);
+            TextUtils.AppendSocialMemory(context, profile, 1);
+            TextUtils.AppendWorldEvents(context, brain.WorldEvents, 1);
 
             List<ChatMessage> messages = new()
             {
                 new ChatMessage("system",
-                    "Plan the next " + requestedCount + " believable physical office activities for a simulation worker. You are " + who + ". " +
-                    profile.personality + " Create a short, varied sequence that fits their needs, personality, and recent context. " +
-                    "When practical, honor an unresolved promise, favor, invitation, or plan from social memory. " +
-                    "Do not repeat the same action consecutively or fill the sequence with desk work. " +
-                    "When one objective needs multiple physical steps, make 2 to 4 consecutive activities a linked sequence. " +
-                    "Give those activities the same short sequenceId and objective, with sequenceStep starting at 1 and increasing by 1. " +
-                    "Example: walk to printer, use printer, then return to desk. Leave sequenceId and objective empty and sequenceStep 0 for independent activities. " +
-                    "ActionPoint means an exact object such as a desk, printer, or coffee machine. " +
-                    "FreePosition means a reachable place in the office. CurrentPosition means no travel. " +
-                    "FollowAgent means approach the named coworker's live position; use it only for ApproachColleague. " +
-                    "If current state says phone call is due and PhoneCall is allowed, include exactly one PhoneCall unless an unresolved commitment needs the full batch. " +
-                    "Use PhoneCall for a brief personal call with someone outside the company; do not replace it with CheckPhone. " +
-                    "You may use Custom as actionType to invent a new custom action not tied to any scene object; set customActionLabel to a short description (e.g., \"look out window\", \"take a quiet breath\"). " +
-                    "Do not overuse stretching; choose it only when the character specifically needs a physical reset. " +
-                    "Custom actions cannot create, fetch, carry, give, or transfer objects. Do not plan snacks, food, presents, birthday gifts, or other unavailable items unless the action is VendingMachine. " +
-                    "Custom actions use FreePosition or CurrentPosition as destinationMode. " +
-                    "Optionally set energyChange, focusChange, socialChange, productivityChange (negative to decrease, positive to increase, default 0) to describe need effects. " +
-                    "If an activity physically fulfills one open social-memory commitment, copy that memory's subject exactly into socialMemorySubject; otherwise use an empty string. " +
-                    "For an invitation, choose BreakSpot or ChatSpot, target the invited coworker, and write a specific in-character socialOpeningLine that refers naturally to the remembered plan. " +
-                    "socialOpeningLine must use simple everyday English and contain one sentence of 4 to 12 words with one clear idea. " +
-                    "Respond only as JSON with exactly one activities array: " +
+                    "Plan " + requestedCount + " varied physical office activities for " +
+                    who + ". Profile: " + profile.personality + " Fit current needs and memory. " +
+                    "Do not repeat actions or overuse desk work. Honor one open social commitment when practical. " +
+                    "Independent activities use empty sequenceId/objective and sequenceStep 0. A 2-4 step objective uses one sequenceId, one objective, and increasing sequenceStep values. " +
+                    "ActionPoint targets a scene object; FreePosition a reachable area; CurrentPosition no travel; FollowAgent only ApproachColleague. PhoneCall always uses CurrentPosition and can happen anywhere. " +
+                    "If a phone call is due, include one PhoneCall unless a commitment fills the batch. " +
+                    "Custom is a short object-free action using FreePosition or CurrentPosition; it cannot create, carry, or transfer items. Food must use VendingMachine. " +
+                    "Use coworkers' visible state: someone tired, lonely, or sad may inspire a supportive visit, snack gift, or conversation, but do not invent facts. " +
+                    "For a shared snack discussion, make a sequence VendingMachine then BreakSpot/ChatSpot with a named target; set companionPreparation to Snack on the social step if both should get snacks. " +
+                    "For a gift, make a sequence VendingMachine then ApproachColleague and set giveHeldItemToTarget true only on the approach step. " +
+                    "To fulfill a commitment, copy its exact subject into socialMemorySubject. Social actions use BreakSpot or ChatSpot and a named target. " +
+                    "Respond only as JSON: " +
                     "{\"activities\":[{\"actionType\":string,\"destinationMode\":string,\"destinationHint\":string," +
                     "\"sequenceId\":string,\"sequenceStep\":number,\"objective\":string," +
                     "\"targetAgent\":string,\"durationSeconds\":number,\"reason\":string,\"thought\":string," +
-                    "\"customActionLabel\":string,\"energyChange\":number,\"focusChange\":number,\"socialChange\":number,\"productivityChange\":number,\"socialMemorySubject\":string,\"socialOpeningLine\":string}" +
+                    "\"customActionLabel\":string,\"energyChange\":number,\"focusChange\":number,\"socialChange\":number,\"productivityChange\":number,\"socialMemorySubject\":string,\"companionPreparation\":string,\"giveHeldItemToTarget\":boolean}" +
                     "]}. Return exactly " + requestedCount + " activity objects. " +
                     "actionType must be one of: " + allowed + ", or Custom. " +
-                    "destinationMode must be ActionPoint, FreePosition, CurrentPosition, or FollowAgent. " +
-                    "For a free destination, destinationHint can be General, Quiet, Lounge, WorkArea, or Corridor. " +
+                    "destinationMode is ActionPoint, FreePosition, CurrentPosition, or FollowAgent. Free destinationHint is General, Quiet, Lounge, WorkArea, or Corridor. " +
                     (string.IsNullOrWhiteSpace(coworkerNames)
                         ? "No coworkers are currently available, so do not choose ApproachColleague. "
                         : "For ApproachColleague, targetAgent must be exactly one of: " + coworkerNames + ". ") +
-                    "Use ApproachColleague when asking that coworker for advice, help, or a discussion. For ApproachColleague, thought must be the exact complete short sentence spoken on arrival, not an internal thought. " +
-                    "durationSeconds must be between 2 and 30. " +
-                    "reason is 3 to 14 words. thought is optional, complete, and 0 to 10 words for private thoughts or 4 to 12 words for ApproachColleague openings."),
+                    "ApproachColleague thought is the 4-12 word arrival line. durationSeconds is 2-30; reason is 3-14 words; other thoughts are at most 10 words."),
                 new ChatMessage("user", context.ToString())
             };
 
@@ -94,15 +92,13 @@ public class LLMActivityPlanner
             {
                 requestLabel = "ActivityBatch:" + who,
                 temperature = Mathf.Clamp(temperature, 0.55f, 0.8f),
-                maxTokens = Mathf.Clamp(requestedCount * 150, 300, 800),
+                maxTokens = Mathf.Clamp(requestedCount * 90, 220, 360),
                 jsonMode = true,
-                structuredSchema = LLMJsonSchema.ActivityPlan,
                 timeoutSeconds = Mathf.Min(requestTimeoutSeconds,
                     Mathf.Max(8, activityPlanTimeoutSeconds)),
-                maxRetries = 2,
-                retryBaseDelaySeconds = 5f
+                maxRetries = 0
             };
-            string raw = await backend.CompleteAsync(messages, options);
+            string raw = await activeBackend.CompleteAsync(messages, options);
             List<OfficeActivityPlan> plans = ParseActivityPlans(
                 raw, availableActions, coworkers, requestedCount, profile);
             plans = PrependCommitment(plans, commitmentPlans, requestedCount);
@@ -488,12 +484,13 @@ public class LLMActivityPlanner
         string targetAgent = TextUtils.CleanShortText(dto.targetAgent, 6);
         bool requiresCoworker = destinationMode == OfficeDestinationMode.FollowAgent
             || actionType == OfficeActionType.ApproachColleague;
-        if (requiresCoworker && TextUtils.FindParticipant(coworkers, targetAgent) == null)
+        bool socialAction = actionType == OfficeActionType.BreakSpot
+            || actionType == OfficeActionType.ChatSpot;
+        if ((requiresCoworker || (socialAction && !string.IsNullOrWhiteSpace(targetAgent)))
+            && TextUtils.FindParticipant(coworkers, targetAgent) == null)
             return null;
 
         SocialMemoryEntry commitment = FindOpenSocialMemory(profile, dto.socialMemorySubject);
-        bool socialAction = actionType == OfficeActionType.BreakSpot
-            || actionType == OfficeActionType.ChatSpot;
         if (commitment != null && commitment.type == "invitation"
             && (!socialAction || destinationMode != OfficeDestinationMode.ActionPoint
                 || !string.Equals(targetAgent, commitment.targetAgent,
@@ -523,6 +520,21 @@ public class LLMActivityPlanner
             }
         }
 
+        string companionPreparation = TextUtils.CleanShortText(
+            dto.companionPreparation, 1);
+        if (!socialAction || string.IsNullOrWhiteSpace(targetAgent)
+            || (!string.Equals(companionPreparation, "Snack",
+                    StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(companionPreparation, "Coffee",
+                    StringComparison.OrdinalIgnoreCase)))
+            companionPreparation = "";
+
+        bool giveHeldItemToTarget = dto.giveHeldItemToTarget
+            && actionType == OfficeActionType.ApproachColleague
+            && destinationMode == OfficeDestinationMode.FollowAgent
+            && !string.IsNullOrWhiteSpace(targetAgent)
+            && !string.IsNullOrWhiteSpace(dto.sequenceId);
+
         return new OfficeActivityPlan
         {
             actionType = actionType,
@@ -543,8 +555,8 @@ public class LLMActivityPlanner
             productivityChange = dto.productivityChange,
             socialMemorySubject = commitment != null ? commitment.subject : "",
             completesSocialCommitment = commitment != null,
-            socialOpeningLine = commitment != null && socialAction
-                ? TextUtils.CleanShortText(dto.socialOpeningLine, 20) : ""
+            companionPreparation = companionPreparation,
+            giveHeldItemToTarget = giveHeldItemToTarget
         };
     }
 
@@ -668,9 +680,21 @@ public class LLMActivityPlanner
                         StringComparison.OrdinalIgnoreCase);
             }
 
+            bool obtainedItem = false;
+            for (int i = index; valid && i < end; i++)
+            {
+                obtainedItem |= plans[i].actionType == OfficeActionType.VendingMachine
+                    || plans[i].actionType == OfficeActionType.CoffeeMachine;
+                if (plans[i].giveHeldItemToTarget && !obtainedItem)
+                    valid = false;
+            }
+
             if (!valid)
                 for (int i = index; i < end; i++)
+                {
+                    plans[i].giveHeldItemToTarget = false;
                     ClearSequence(plans[i]);
+                }
             index = end;
         }
     }
@@ -698,6 +722,8 @@ public class LLMActivityPlanner
         return null;
     }
 
+    // JsonUtility assigns these fields through reflection.
+#pragma warning disable CS0649
     [Serializable]
     private class ActivityPlanBatchDTO
     {
@@ -723,6 +749,8 @@ public class LLMActivityPlanner
         public float socialChange;
         public float productivityChange;
         public string socialMemorySubject;
-        public string socialOpeningLine;
+        public string companionPreparation;
+        public bool giveHeldItemToTarget;
     }
+#pragma warning restore CS0649
 }

@@ -129,6 +129,7 @@ public class VendingEventDispatcher : MonoBehaviour
         if (evt is VendingBuffEventSO buff)
             PlayMachineReaction(buff, targets);
         ApplyCosmetic(evt, targets);
+        OfficeEventDirector.Instance?.NotifyVendingEvent(evt, targets);
 
         if (targets.Count == 0)
             yield break;
@@ -204,10 +205,13 @@ public class VendingEventDispatcher : MonoBehaviour
                     if (hat != null)
                     {
                         HatCatalogSO.HatPool pool = hatCatalog.GetPool(targets[0].AgentType);
-                        AgentCosmetics cosmetics = targets[0].GetComponent<AgentCosmetics>();
-                        if (cosmetics == null)
-                            cosmetics = targets[0].gameObject.AddComponent<AgentCosmetics>();
-                        cosmetics.ApplyHat(hat.sprite, pool, hat.localScale);
+                        if (pool != null && targets[0].TryGetComponent(
+                                out AgentPresentation2D presentation))
+                        {
+                            presentation.ApplyHat(
+                                hat.sprite, pool.standingOffset, pool.sittingOffset,
+                                hat.localScale);
+                        }
                         Sprite face = GetAgentIcon(targets[0]);
                         HighlightTransform(targets[0].transform, 3f);
                         if (announcer != null)

@@ -8,6 +8,7 @@ MonoBehaviour:
   eventId: coffee
   displayName: Coffee Drop
   description: Caffeine hits the office - frenzy mode!
+  characterReaction: I suddenly have enough energy for three impossible tasks.
   energyChange: 30
   speedMultiplier: 2
   speedBuffDuration: 30

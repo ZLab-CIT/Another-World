@@ -14,8 +14,11 @@ public interface IVendingGachaEvent
 [System.Serializable]
 public struct PhysicalInteractionEvent
 {
+    public string eventId;
     public string productId;
     public string userId;
+    public long occurredAtUnixMilliseconds;
+    public string source;
 }
 
 [System.Serializable]
@@ -34,6 +37,8 @@ public abstract class VendingEventSO : ScriptableObject
     public string eventId;
     public string displayName = "Vending Event";
     [TextArea] public string description = "Something happened in the office.";
+    [Tooltip("Immediate thought shown by an affected character. Leave empty for an automatic reaction.")]
+    [TextArea] public string characterReaction;
     public Sprite icon;
 
     [Header("Targeting")]

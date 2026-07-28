@@ -43,6 +43,11 @@ public class VendingMachineAvatar : MonoBehaviour
         initialLocalRotation = shakeTarget.localRotation;
     }
 
+    private void OnDisable()
+    {
+        RestoreOrientation();
+    }
+
     public void PlayDropAnimation(SceneItem item, float lifetime)
     {
         CancelAnimation(true);
@@ -57,6 +62,7 @@ public class VendingMachineAvatar : MonoBehaviour
             StopCoroutine(activeSequence);
             activeSequence = null;
         }
+        RestoreOrientation();
 
         // If the item got picked up mid-fade, restore its full visibility
         if (currentItem != null)
@@ -124,6 +130,12 @@ public class VendingMachineAvatar : MonoBehaviour
         activeSequence = null;
     }
 
+    private void RestoreOrientation()
+    {
+        if (shakeTarget != null)
+            shakeTarget.localRotation = initialLocalRotation;
+    }
+
     private IEnumerator Shake()
     {
         Transform t = shakeTarget;
@@ -136,7 +148,7 @@ public class VendingMachineAvatar : MonoBehaviour
             t.localRotation = initialLocalRotation * Quaternion.Euler(0f, 0f, angle);
             yield return null;
         }
-        t.localRotation = initialLocalRotation;
+        RestoreOrientation();
     }
 
     private IEnumerator PopIn(Transform t, Vector3 targetScale)

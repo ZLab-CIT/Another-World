@@ -51,4 +51,34 @@ public class AgentEffects : MonoBehaviour
         socialDecayMultiplier = Mathf.Max(0f, social);
         decayOverrideUntil = Time.time + duration;
     }
+
+    public void CaptureState(PersistedAgentRuntimeState state)
+    {
+        if (state == null)
+            return;
+        state.speedMultiplier = speedMultiplier;
+        state.speedBuffRemainingSeconds = Mathf.Max(0f, speedUntil - Time.time);
+        state.energyDecayMultiplier = energyDecayMultiplier;
+        state.focusDecayMultiplier = focusDecayMultiplier;
+        state.socialDecayMultiplier = socialDecayMultiplier;
+        state.decayOverrideRemainingSeconds =
+            Mathf.Max(0f, decayOverrideUntil - Time.time);
+    }
+
+    public void RestoreState(PersistedAgentRuntimeState state)
+    {
+        if (state == null)
+            return;
+        speedMultiplier = Mathf.Max(0f, state.speedMultiplier);
+        speedUntil = state.speedBuffRemainingSeconds > 0f
+            ? Time.time + state.speedBuffRemainingSeconds : -1f;
+        energyDecayMultiplier = state.energyDecayMultiplier > 0f
+            ? state.energyDecayMultiplier : 1f;
+        focusDecayMultiplier = state.focusDecayMultiplier > 0f
+            ? state.focusDecayMultiplier : 1f;
+        socialDecayMultiplier = state.socialDecayMultiplier > 0f
+            ? state.socialDecayMultiplier : 1f;
+        decayOverrideUntil = state.decayOverrideRemainingSeconds > 0f
+            ? Time.time + state.decayOverrideRemainingSeconds : -1f;
+    }
 }

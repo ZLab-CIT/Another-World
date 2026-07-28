@@ -8,6 +8,7 @@ MonoBehaviour:
   eventId: confetti
   displayName: Confetti Burst
   description: A visible celebration erupts across the office!
+  characterReaction: Nobody warned me the office was about to celebrate.
   count: 140
   duration: 2.4
   announceDuration: 1.2

@@ -15,6 +15,7 @@ MonoBehaviour:
   eventId: plant
   displayName: Office Plant
   description: A plant grows in the office upgrade corner.
+  characterReaction: We have a new plant, so now we are responsible for it.
   icon: {fileID: 0}
   scope: 0
   nearbyRadius: 2

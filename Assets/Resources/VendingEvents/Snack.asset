@@ -8,6 +8,7 @@ MonoBehaviour:
   eventId: snack
   displayName: Snack Break
   description: A nearby snack lifts the mood.
+  characterReaction: Whoever bought that snack just rescued this afternoon.
   scope: 1
   nearbyRadius: 2
   energyChange: 10

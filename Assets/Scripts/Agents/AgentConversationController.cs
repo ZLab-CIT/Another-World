@@ -8,10 +8,7 @@ using UnityEngine;
 public class AgentConversationController : MonoBehaviour
 {
     private static readonly HashSet<OfficeActionPoint> activeConversationActions = new();
-    private static readonly Dictionary<string, Queue<string>> recentLocalOpeners = new();
-    private static readonly Queue<string> recentFallbackReplies = new();
-    private const int RecentLocalOpenerLimit = 12;
-    private const int RecentFallbackReplyLimit = 24;
+    private static AgentConversationController activeConversationOwner;
 
     [SerializeField, Min(0.1f)] private float participantRadius = 1.5f;
     [SerializeField, Min(0.5f)] private float conversationSeparationRadius = 2.25f;
@@ -22,9 +19,9 @@ public class AgentConversationController : MonoBehaviour
 
     private readonly Dictionary<string, int> affinity = new();
     private AIWorkerAgent owner;
+    private OfficeActionPoint ownedConversationAction;
     private float nextSocialCheckTime;
     private bool inConversation;
-    private int localStarterVariation;
     public bool IsInConversation => inConversation;
     public bool IsSociallyCoolingDown => Time.time < nextSocialCheckTime;
 
@@ -36,11 +33,15 @@ public class AgentConversationController : MonoBehaviour
     private void Awake()
     {
         owner = GetComponent<AIWorkerAgent>();
-        localStarterVariation = UnityEngine.Random.Range(0, 1000);
     }
 
     private void OnDisable()
     {
+        if (activeConversationOwner == this)
+            activeConversationOwner = null;
+        if (ownedConversationAction != null)
+            activeConversationActions.Remove(ownedConversationAction);
+        ownedConversationAction = null;
         inConversation = false;
         owner?.HideThought();
         owner?.HideSpeech();
@@ -64,6 +65,23 @@ public class AgentConversationController : MonoBehaviour
     public string BuildRelationships()
     {
         string result = owner != null ? owner.GetEstablishedRelationships() : "";
+        LLMBrainService brain = LLMBrainService.Instance;
+        OfficeCrowdCoordinator2D crowd = OfficeCrowdCoordinator2D.Instance;
+        if (owner != null && brain != null && crowd != null)
+        {
+            int added = 0;
+            foreach (AIWorkerAgent worker in crowd.Workers)
+            {
+                if (worker == null || worker == owner || added >= 4)
+                    continue;
+                string dynamicRelationship =
+                    brain.BuildRelationshipContext(owner.AgentId, worker.AgentId);
+                result += (result.Length > 0 ? "; " : "") + worker.DisplayName + ": "
+                    + dynamicRelationship;
+                added++;
+            }
+        }
+
         int count = 0;
         foreach (KeyValuePair<string, int> relationship in affinity)
         {
@@ -88,7 +106,8 @@ public class AgentConversationController : MonoBehaviour
         {
             agentId = owner.AgentId,
             displayName = owner.DisplayName,
-            relationships = BuildRelationships()
+            relationships = BuildRelationships(),
+            currentState = owner.GetLLMStateSummary()
         };
     }
 
@@ -122,14 +141,13 @@ public class AgentConversationController : MonoBehaviour
         List<AIWorkerAgent> alreadyThere = candidates.FindAll(candidate => candidate.IsActingAt(action));
         if (alreadyThere.Count >= 2 && UnityEngine.Random.value < 0.35f)
         {
-            string groupOpener = CreateGroupConversationOpener(localStarterVariation++);
             return new ConversationIntent
             {
                 initiatorAgentId = owner.AgentId,
                 initiatorName = owner.DisplayName,
                 intendedPartnerName = "",
-                topic = groupOpener,
-                openingLine = groupOpener,
+                topic = "",
+                openingLine = "",
                 actionType = action.actionType,
                 createdAt = Time.time,
                 expiresAt = expiresAt
@@ -141,168 +159,17 @@ public class AgentConversationController : MonoBehaviour
             : affinity.Count > 0 && UnityEngine.Random.value < 0.55f
                 ? candidates[0]
                 : candidates[UnityEngine.Random.Range(0, candidates.Count)];
-        string opener = ChooseLocalOpener(partner.DisplayName);
-
         return new ConversationIntent
         {
             initiatorAgentId = owner.AgentId,
             initiatorName = owner.DisplayName,
             intendedPartnerName = partner.DisplayName,
-            topic = opener,
-            openingLine = opener,
+            topic = "",
+            openingLine = "",
             actionType = action.actionType,
             createdAt = Time.time,
             expiresAt = expiresAt
         };
-    }
-
-    private string ChooseLocalOpener(string partnerName)
-    {
-        LLMBrainService brain = LLMBrainService.Instance;
-        List<string> candidates = BuildLocalOpenerCandidates(partnerName);
-        Shuffle(candidates);
-
-        string fallback = null;
-        foreach (string candidate in candidates)
-        {
-            if (string.IsNullOrWhiteSpace(candidate))
-                continue;
-
-            string opener = candidate.Trim();
-            fallback ??= opener;
-            if (WasRecentlyUsedLocalOpener(owner.AgentId, opener))
-                continue;
-            if (brain != null && !brain.IsFreshOpening(owner.AgentId, opener))
-                continue;
-
-            RememberLocalOpener(owner.AgentId, opener);
-            return opener;
-        }
-
-        string contextual = CreateContextualStarter(partnerName, localStarterVariation++);
-        string chosen = fallback != null && UnityEngine.Random.value < 0.35f ? fallback : contextual;
-        RememberLocalOpener(owner.AgentId, chosen);
-        return chosen;
-    }
-
-    private List<string> BuildLocalOpenerCandidates(string partnerName)
-    {
-        List<string> candidates = new();
-        int starterCount = owner.ConversationStarterCount;
-        for (int i = 0; i < starterCount; i++)
-            candidates.Add(owner.GetConversationStarter(partnerName, i));
-
-        int seed = localStarterVariation + UnityEngine.Random.Range(0, 1000);
-        for (int i = 0; i < 10; i++)
-            candidates.Add(CreateContextualStarter(partnerName, seed + i));
-
-        localStarterVariation += UnityEngine.Random.Range(3, 17);
-        return candidates;
-    }
-
-    private static void Shuffle(List<string> values)
-    {
-        if (values == null)
-            return;
-
-        for (int i = values.Count - 1; i > 0; i--)
-        {
-            int j = UnityEngine.Random.Range(0, i + 1);
-            (values[i], values[j]) = (values[j], values[i]);
-        }
-    }
-
-    private static bool WasRecentlyUsedLocalOpener(string agentId, string opener)
-    {
-        if (string.IsNullOrWhiteSpace(agentId) || string.IsNullOrWhiteSpace(opener))
-            return false;
-        if (!recentLocalOpeners.TryGetValue(agentId, out Queue<string> recent))
-            return false;
-
-        string normalized = NormalizeLocalOpener(opener);
-        foreach (string value in recent)
-            if (value == normalized)
-                return true;
-        return false;
-    }
-
-    private static void RememberLocalOpener(string agentId, string opener)
-    {
-        if (string.IsNullOrWhiteSpace(agentId) || string.IsNullOrWhiteSpace(opener))
-            return;
-
-        if (!recentLocalOpeners.TryGetValue(agentId, out Queue<string> recent))
-        {
-            recent = new Queue<string>();
-            recentLocalOpeners[agentId] = recent;
-        }
-
-        recent.Enqueue(NormalizeLocalOpener(opener));
-        while (recent.Count > RecentLocalOpenerLimit)
-            recent.Dequeue();
-    }
-
-    private static string NormalizeLocalOpener(string opener)
-    {
-        return opener.Trim().ToLowerInvariant();
-    }
-
-    private static string CreateGroupConversationOpener(int variation)
-    {
-        switch (Mathf.Abs(variation) % 6)
-        {
-            case 0:
-                return "Guys, what do you think makes a small office ritual actually worth keeping?";
-            case 1:
-                return "Everyone, be honest, which tiny work habit secretly saves your whole day?";
-            case 2:
-                return "Guys, what would you change here if nobody could say no for one afternoon?";
-            case 3:
-                return "Everyone, what is the most underrated way to make a rough day easier?";
-            case 4:
-                return "Guys, which harmless office debate are you surprisingly willing to defend?";
-            default:
-                return "Everyone, what is one small thing here that feels oddly important?";
-        }
-    }
-
-    private string CreateContextualStarter(string partnerName, int variation)
-    {
-        switch (Mathf.Abs(variation) % 16)
-        {
-            case 0:
-                return partnerName + ", I need a second opinion before this thought becomes my whole afternoon.";
-            case 1:
-                return partnerName + ", what is one tiny thing here you would improve first?";
-            case 2:
-                return partnerName + ", I just remembered something oddly specific and now I need your reaction.";
-            case 3:
-                return partnerName + ", which small office mystery deserves an investigation today?";
-            case 4:
-                return partnerName + ", tell me if this is useful thinking or just break-time nonsense.";
-            case 5:
-                return partnerName + ", what would make today feel less repetitive for you?";
-            case 6:
-                return partnerName + ", I have a harmless question with surprisingly strong opinions attached.";
-            case 7:
-                return partnerName + ", what is the most interesting thing you noticed today?";
-            case 8:
-                return partnerName + ", I am trying to decide whether this is a good idea or just a confident one.";
-            case 9:
-                return partnerName + ", what is something small here that people underestimate?";
-            case 10:
-                return partnerName + ", I want your honest answer before I overthink this.";
-            case 11:
-                return partnerName + ", what would you defend in this office even if everyone disagreed?";
-            case 12:
-                return partnerName + ", I need a reality check on a thought I just had.";
-            case 13:
-                return partnerName + ", what is one thing today that deserves more attention?";
-            case 14:
-                return partnerName + ", I have a question that sounds casual but might reveal too much.";
-            default:
-                return partnerName + ", what would make this break more interesting?";
-        }
     }
 
     private float PartnerScore(AIWorkerAgent candidate, OfficeActionPoint action)
@@ -310,6 +177,8 @@ public class AgentConversationController : MonoBehaviour
         if (candidate == null)
             return float.MinValue;
         float score = affinity.TryGetValue(candidate.DisplayName, out int closeness) ? closeness * 4f : 0f;
+        score += (LLMBrainService.Instance?.GetRelationshipScore(
+            owner.AgentId, candidate.AgentId) ?? 0f) * 3f;
         if (action != null && candidate.IsActingAt(action))
             score += 100f;
         return score;
@@ -332,7 +201,7 @@ public class AgentConversationController : MonoBehaviour
             return;
 
         LLMBrainService brain = LLMBrainService.Instance;
-        if (brain == null || !brain.EnableSocialReplies)
+        if (brain == null)
             return;
 
         List<AIWorkerAgent> speakers = new() { owner };
@@ -340,8 +209,23 @@ public class AgentConversationController : MonoBehaviour
         AIWorkerAgent starter = SelectConversationStarter(action, speakers, out ConversationIntent intent);
         if (starter != owner)
             return;
+        bool featured = intent?.preparedScript != null || intent?.onOpeningSpoken != null;
+        if (!featured && !(intent?.routineConversationReserved ?? false)
+            && !brain.TryReserveRoutineConversation())
+        {
+            EndSilentSocialWait(speakers);
+            return;
+        }
 
         BeginGeneratedConversation(action, participants, intent);
+    }
+
+    private static void EndSilentSocialWait(List<AIWorkerAgent> speakers)
+    {
+        if (speakers == null)
+            return;
+        foreach (AIWorkerAgent speaker in speakers)
+            speaker?.EndSilentSocialWait();
     }
 
     private AIWorkerAgent SelectConversationStarter(OfficeActionPoint action,
@@ -386,16 +270,23 @@ public class AgentConversationController : MonoBehaviour
         return null;
     }
 
-    private void BeginConversation(OfficeActionPoint action, List<AIWorkerAgent> participants,
-        string line, string topic, string intendedPartnerName, Action onOpeningSpoken = null)
+    private bool BeginConversation(OfficeActionPoint action, List<AIWorkerAgent> participants,
+        string line, string topic, string intendedPartnerName, Action onOpeningSpoken = null,
+        ConversationScript preparedScript = null)
     {
+        if (activeConversationOwner != null && activeConversationOwner != this)
+            return false;
         if (action != null && activeConversationActions.Contains(action))
-            return;
+            return false;
         participants = SelectConversationPair(participants, intendedPartnerName);
         if (participants.Count == 0 || HasUnrelatedConversationNearby(participants))
-            return;
+            return false;
         if (action != null)
+        {
             activeConversationActions.Add(action);
+            ownedConversationAction = action;
+        }
+        activeConversationOwner = this;
 
         owner.ClearConversationDirective();
         SetConversationState(owner, true);
@@ -419,42 +310,51 @@ public class AgentConversationController : MonoBehaviour
             EndConversation(participants);
             if (action != null)
                 activeConversationActions.Remove(action);
-            return;
+            ownedConversationAction = null;
+            if (activeConversationOwner == this)
+                activeConversationOwner = null;
+            return false;
         }
 
-        RunConversation(action, participants, line, topic, intendedPartnerName, onOpeningSpoken);
+        RunConversation(action, participants, line, topic, intendedPartnerName,
+            onOpeningSpoken, preparedScript);
+        return true;
     }
 
     private void BeginGeneratedConversation(OfficeActionPoint action,
         List<AIWorkerAgent> participants, ConversationIntent intent)
     {
-        if (intent == null || string.IsNullOrWhiteSpace(intent.openingLine))
+        if (intent == null)
             return;
 
         string intendedPartner = intent.intendedPartnerName ?? "";
-        string opener = intent.openingLine.Trim();
-        string topic = string.IsNullOrWhiteSpace(intent.topic) ? opener : intent.topic.Trim();
+        string opener = intent.openingLine?.Trim() ?? "";
+        string topic = intent.topic?.Trim() ?? "";
 
-        BeginConversation(action, participants, opener, topic, intendedPartner, intent.onOpeningSpoken);
+        BeginConversation(action, participants, opener, topic, intendedPartner,
+            intent.onOpeningSpoken, intent.preparedScript);
     }
 
-    public bool BeginDirectConversation(AIWorkerAgent target, string openingLine, string topic)
+    public bool BeginDirectConversation(AIWorkerAgent target, string openingLine, string topic,
+        ConversationScript preparedScript = null, bool routineConversationReserved = false)
     {
         AgentConversationController targetConversation = GetController(target);
         if (target == null || target == owner || inConversation
             || targetConversation == null || targetConversation.inConversation
-            || string.IsNullOrWhiteSpace(openingLine)
             || HasUnrelatedConversationNearby(new List<AIWorkerAgent> { target }))
             return false;
+        if (preparedScript == null && !routineConversationReserved
+            && !(LLMBrainService.Instance?.TryReserveRoutineConversation() ?? false))
+            return false;
 
-        BeginConversation(null, new List<AIWorkerAgent> { target }, openingLine,
+        return BeginConversation(null, new List<AIWorkerAgent> { target }, openingLine,
             string.IsNullOrWhiteSpace(topic) ? openingLine : topic,
-            target.DisplayName);
-        return true;
+            target.DisplayName, preparedScript: preparedScript);
     }
 
     private async void RunConversation(OfficeActionPoint action, List<AIWorkerAgent> participants,
-        string openerLine, string topic, string intendedPartnerName, Action onOpeningSpoken)
+        string openerLine, string topic, string intendedPartnerName, Action onOpeningSpoken,
+        ConversationScript preparedScript)
     {
         LLMBrainService brain = LLMBrainService.Instance;
         List<AIWorkerAgent> speakers = new() { owner };
@@ -466,13 +366,11 @@ public class AgentConversationController : MonoBehaviour
         List<ConversationTurn> completedTurns = new();
         List<SocialMemoryEntry> completedSocialEvents = null;
         List<ConversationParticipantContext> contexts = null;
+        bool conversationSpoken = false;
+        string spokenOpening = "";
 
         try
         {
-            await DisplayTurnAsync(owner, openerLine, speakers);
-            onOpeningSpoken?.Invoke();
-            owner.ApplyEffects(0f, 0f, 5f, 0f);
-
             contexts = BuildParticipantContexts(speakers);
             int replyCount = Mathf.Clamp(maxTurns - 1, 1, 4);
             if (speakers.Count > 2)
@@ -480,12 +378,26 @@ public class AgentConversationController : MonoBehaviour
 
             List<string> speakerOrder = BuildSpeakerOrder(speakers, intendedPartnerName,
                 replyCount, topic, openerLine);
-            Task<ConversationScript> scriptTask = brain != null && speakerOrder.Count > 0
-                ? brain.GenerateConversationAsync(contexts, owner.DisplayName, openerLine, topic, speakerOrder)
-                : null;
-            ConversationScript script = scriptTask != null ? await scriptTask : null;
-            List<ConversationTurn> generated = MergeGeneratedTurns(
-                script?.turns, speakerOrder, openerLine, topic);
+            ConversationScript script = preparedScript;
+            if (script == null && brain != null && speakerOrder.Count > 0)
+                script = await brain.GenerateConversationAsync(contexts,
+                    owner.DisplayName, topic, speakerOrder);
+            if (script == null || string.IsNullOrWhiteSpace(script.openingLine))
+                return;
+
+            spokenOpening = script.openingLine;
+            await DisplayTurnAsync(owner, spokenOpening, speakers);
+            conversationSpoken = true;
+            onOpeningSpoken?.Invoke();
+            owner.ApplyEffects(0f, 0f, 5f, 0f);
+
+            List<ConversationTurn> generated = preparedScript != null
+                ? new List<ConversationTurn>(preparedScript.turns)
+                : script != null
+                    ? MergeGeneratedTurns(script.turns, speakerOrder)
+                    : new List<ConversationTurn>();
+            if (generated.Count == 0)
+                return;
 
             foreach (ConversationTurn turn in generated)
             {
@@ -507,16 +419,25 @@ public class AgentConversationController : MonoBehaviour
         finally
         {
             contexts ??= BuildParticipantContexts(speakers);
-            brain?.RecordConversation(contexts, topic, owner.DisplayName, openerLine,
-                completedTurns, completedSocialEvents);
-            RememberConversation(brain, speakers, topic);
-            StrengthenRelationships(speakers);
+            if (conversationSpoken)
+            {
+                string recordedTopic = string.IsNullOrWhiteSpace(topic)
+                    ? spokenOpening : topic;
+                brain?.RecordConversation(contexts, recordedTopic,
+                    owner.DisplayName, spokenOpening,
+                    completedTurns, completedSocialEvents);
+                RememberConversation(brain, speakers, recordedTopic);
+                StrengthenRelationships(speakers, completedSocialEvents, recordedTopic);
+            }
             HideAll(speakers);
             SetConversationCooldown(speakers, 2.5f);
             EndConversation(participants);
-            ReleaseAfterConversation(speakers);
+            ReleaseAfterConversation(speakers, conversationSpoken);
             if (action != null)
                 activeConversationActions.Remove(action);
+            ownedConversationAction = null;
+            if (activeConversationOwner == this)
+                activeConversationOwner = null;
         }
     }
 
@@ -580,72 +501,9 @@ public class AgentConversationController : MonoBehaviour
         return names;
     }
 
-    private static List<ConversationTurn> BuildFallbackTurns(
-        List<string> speakerOrder, string openerLine, string topic)
-    {
-        List<ConversationTurn> turns = new();
-        if (speakerOrder == null)
-            return turns;
-
-        string subject = ResolveFallbackSubject(topic, openerLine);
-        bool birthday = IsBirthdayTopic(openerLine) || IsBirthdayTopic(topic);
-        bool hatGift = ContainsIgnoreCase(openerLine, "hat") || ContainsIgnoreCase(topic, "hat");
-        bool snackGift = ContainsIgnoreCase(openerLine, "snack") || ContainsIgnoreCase(topic, "snack");
-        if (birthday)
-            return BuildBirthdayFallbackTurns(speakerOrder, subject, hatGift, snackGift);
-
-        string[] templates =
-        {
-            "I see what you mean.",
-            "That sounds reasonable to me.",
-            "I had not thought about it that way.",
-            "The practical details will matter.",
-            "We can start small and see how it goes.",
-            "That gives us something useful to work with.",
-            "I think we are getting closer to an answer.",
-            "It would help to keep the plan simple.",
-            "That seems worth trying.",
-            "I can work with that idea.",
-            "Let us think through the next step.",
-            "That clears up the main concern for me."
-        };
-
-        int offset = ConversationTemplateOffset(subject, speakerOrder);
-        for (int i = 0; i < speakerOrder.Count; i++)
-        {
-            if (string.IsNullOrWhiteSpace(speakerOrder[i]))
-                continue;
-            turns.Add(new ConversationTurn
-            {
-                speaker = speakerOrder[i],
-                line = PickFallbackReply(templates, i + offset)
-            });
-        }
-
-        return turns;
-    }
-
-    private static void CompletePartialTurns(List<ConversationTurn> turns,
-        List<string> speakerOrder, string initiatingSpeaker, string topic)
-    {
-        if (turns == null || speakerOrder == null)
-            return;
-        while (turns.Count < speakerOrder.Count)
-        {
-            int index = turns.Count;
-            string speaker = speakerOrder[index];
-            bool initiator = string.Equals(speaker, initiatingSpeaker,
-                StringComparison.OrdinalIgnoreCase);
-            string line = BuildPartialReply(speaker, initiator, index, topic);
-            turns.Add(new ConversationTurn { speaker = speaker, line = line });
-        }
-    }
-
     private static List<ConversationTurn> MergeGeneratedTurns(
-        List<ConversationTurn> generated, List<string> speakerOrder,
-        string openingLine, string topic)
+        List<ConversationTurn> generated, List<string> speakerOrder)
     {
-        List<ConversationTurn> fallbacks = null;
         List<ConversationTurn> merged = new();
         for (int i = 0; i < speakerOrder.Count; i++)
         {
@@ -656,277 +514,9 @@ public class AgentConversationController : MonoBehaviour
                 && string.Equals(candidate.speaker, speakerOrder[i],
                     StringComparison.OrdinalIgnoreCase);
             if (valid)
-            {
                 merged.Add(candidate);
-                continue;
-            }
-
-            if (i == speakerOrder.Count - 1)
-            {
-                merged.Add(new ConversationTurn
-                {
-                    speaker = speakerOrder[i],
-                    line = BuildClosingReply(speakerOrder[i], i, topic)
-                });
-                continue;
-            }
-
-            fallbacks ??= BuildFallbackTurns(speakerOrder, openingLine, topic);
-            if (i < fallbacks.Count)
-                merged.Add(fallbacks[i]);
-            else
-                merged.Add(new ConversationTurn
-                {
-                    speaker = speakerOrder[i],
-                    line = BuildPartialReply(speakerOrder[i], false, i, topic)
-                });
         }
         return merged;
-    }
-
-    private static string BuildClosingReply(string speaker, int index, string topic)
-    {
-        if (IsBirthdayTopic(topic))
-            return "I am glad we got to celebrate this together.";
-        if (ContainsIgnoreCase(topic, "coffee") || ContainsIgnoreCase(topic, "drink"))
-            return "Let's try that and see how it goes.";
-        if (ContainsIgnoreCase(topic, "advice") || ContainsIgnoreCase(topic, "opinion"))
-            return "That gives me something useful to think about.";
-        if (ContainsIgnoreCase(topic, "game") || ContainsIgnoreCase(topic, "program"))
-            return "Let's continue working through those ideas later.";
-        if (ContainsIgnoreCase(topic, "design") || ContainsIgnoreCase(topic, "color"))
-            return "I think we have a useful direction now.";
-
-        string[] closings =
-        {
-            "That sounds like a good place to leave it for now.",
-            "I think we understand each other better now.",
-            "Let's pick this up again after we get some work done.",
-            "I am glad we had a chance to talk about it."
-        };
-        int offset = ((speaker ?? "").GetHashCode() + index) & int.MaxValue;
-        return closings[offset % closings.Length];
-    }
-
-    private static string BuildPartialReply(string speaker, bool initiator, int index, string topic)
-    {
-        if (IsBirthdayTopic(topic))
-        {
-            bool birthdayPerson = !string.IsNullOrWhiteSpace(speaker)
-                && ContainsIgnoreCase(topic, speaker);
-            if (birthdayPerson && !initiator)
-                return "Thank you. I am glad you came.";
-            return initiator
-                ? "I hope you get time to enjoy today."
-                : "I hope today gives you something fun.";
-        }
-
-        if (ContainsIgnoreCase(topic, "coffee") || ContainsIgnoreCase(topic, "drink"))
-            return initiator
-                ? "I chose one I thought you would like."
-                : "Thank you. I will try it now.";
-
-        if (ContainsIgnoreCase(topic, "advice") || ContainsIgnoreCase(topic, "opinion"))
-            return initiator
-                ? "I am not sure which choice would work best."
-                : "What have you tried so far?";
-
-        if (initiator)
-            return "The hardest part is deciding what to do next.";
-        string[] genericReplies =
-        {
-            "What makes that important right now?",
-            "Tell me one part you want to change.",
-            "How would you start doing that?",
-            "What stopped you before?",
-            "Do you think it is worth the effort?",
-            "What would happen if you did nothing?",
-            "When would you know it is working?",
-            "What is the first step?",
-            "Who else cares about this?",
-            "What surprised you about it?"
-        };
-        return genericReplies[index % genericReplies.Length];
-    }
-
-    private static string SpokenSubject(string topic)
-    {
-        string subject = string.IsNullOrWhiteSpace(topic) ? "this" : topic.Trim().TrimEnd('.', '!', '?');
-        string[] prefixes =
-        {
-            "ask for advice on ", "ask advice about ", "discuss ", "check ",
-            "talk about ", "get advice on "
-        };
-        foreach (string prefix in prefixes)
-            if (subject.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                subject = subject.Substring(prefix.Length).Trim();
-                break;
-            }
-        return string.IsNullOrWhiteSpace(subject) ? "this" : subject;
-    }
-
-    private static List<ConversationTurn> BuildBirthdayFallbackTurns(
-        List<string> speakerOrder, string subject, bool hatGift, bool snackGift)
-    {
-        List<ConversationTurn> turns = new();
-        string giftReaction = hatGift
-            ? "The hat is perfect. I am absolutely wearing it today."
-            : snackGift
-                ? "The snack is perfect timing. Thank you, seriously."
-                : "I did not expect everyone to remember. Thank you.";
-        string[] templates =
-        {
-            giftReaction,
-            "We remembered because " + subject + " is not a normal workday.",
-            "Make one birthday wish before someone turns this into a meeting.",
-            "I vote we celebrate properly after the urgent work is done.",
-            "No repeat speeches from me, but I hope this year treats you well.",
-            "Someone should take a photo before the office gets chaotic again.",
-            "This office is bad at surprises, so please act surprised for us.",
-            "I hope the next year gives you fewer emergencies and better snacks.",
-            "You get one birthday veto over our worst conversation topic today.",
-            "I am saving the sentimental speech for when nobody can quote me."
-        };
-
-        for (int i = 0; i < speakerOrder.Count; i++)
-        {
-            if (string.IsNullOrWhiteSpace(speakerOrder[i]))
-                continue;
-            turns.Add(new ConversationTurn
-            {
-                speaker = speakerOrder[i],
-                // BuildSpeakerOrder puts the birthday person first.
-                line = i == 0 ? giftReaction : PickFallbackReply(templates, i + 2)
-            });
-        }
-
-        return turns;
-    }
-
-    private static string PickFallbackReply(string[] templates, int preferredIndex)
-    {
-        if (templates == null || templates.Length == 0)
-            return "";
-
-        for (int attempt = 0; attempt < templates.Length; attempt++)
-        {
-            string candidate = templates[Mathf.Abs(preferredIndex + attempt) % templates.Length];
-            if (!WasRecentlyUsedFallbackReply(candidate))
-            {
-                RememberFallbackReply(candidate);
-                return candidate;
-            }
-        }
-
-        string fallback = templates[Mathf.Abs(preferredIndex) % templates.Length];
-        RememberFallbackReply(fallback);
-        return fallback;
-    }
-
-    private static bool WasRecentlyUsedFallbackReply(string line)
-    {
-        string normalized = NormalizeLocalOpener(line);
-        foreach (string recent in recentFallbackReplies)
-            if (recent == normalized)
-                return true;
-        return false;
-    }
-
-    private static void RememberFallbackReply(string line)
-    {
-        if (string.IsNullOrWhiteSpace(line))
-            return;
-        recentFallbackReplies.Enqueue(NormalizeLocalOpener(line));
-        while (recentFallbackReplies.Count > RecentFallbackReplyLimit)
-            recentFallbackReplies.Dequeue();
-    }
-
-    private static int ConversationTemplateOffset(string subject, List<string> speakerOrder)
-    {
-        unchecked
-        {
-            int hash = subject != null ? subject.GetHashCode() : 17;
-            if (speakerOrder != null)
-                foreach (string speaker in speakerOrder)
-                    hash = hash * 31 + (speaker != null ? speaker.GetHashCode() : 0);
-            hash = hash * 31 + UnityEngine.Random.Range(0, 997);
-            return Mathf.Abs(hash);
-        }
-    }
-
-    private static bool IsBirthdayTopic(string value)
-    {
-        return ContainsIgnoreCase(value, "birthday") || ContainsIgnoreCase(value, "happy birthday");
-    }
-
-    private static bool ContainsIgnoreCase(string value, string fragment)
-    {
-        return !string.IsNullOrWhiteSpace(value)
-            && value.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0;
-    }
-
-    private static string ShortTopic(string topic)
-    {
-        if (string.IsNullOrWhiteSpace(topic))
-            return "that";
-
-        string value = topic.Trim().Trim('"', '\'', '.', '!', '?');
-        string[] words = value.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length <= 6)
-            return value.ToLowerInvariant();
-
-        StringBuilder result = new();
-        for (int i = 0; i < 6; i++)
-        {
-            if (result.Length > 0)
-                result.Append(' ');
-            result.Append(words[i].ToLowerInvariant());
-        }
-        return result.ToString();
-    }
-
-    private static string ResolveFallbackSubject(string topic, string openerLine)
-    {
-        string seed = string.IsNullOrWhiteSpace(topic) ? openerLine : topic;
-        seed = StripAddressedName(seed);
-        seed = SpokenSubject(seed);
-        string subject = ShortTopic(seed);
-        if (string.IsNullOrWhiteSpace(subject) || IsPersonNameLike(subject))
-            subject = "that issue";
-        return subject;
-    }
-
-    private static bool IsPersonNameLike(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return false;
-        string[] words = value.Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-        return words.Length == 1 && value.Length >= 3 && value.Length <= 20;
-    }
-
-    private static string StripAddressedName(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return "";
-
-        string trimmed = value.TrimStart();
-        int comma = trimmed.IndexOf(',');
-        if (comma <= 0 || comma > 20)
-            return trimmed;
-
-        string lead = trimmed.Substring(0, comma).Trim();
-        if (lead.Length == 0 || lead.Length > 20)
-            return trimmed;
-
-        for (int i = 0; i < lead.Length; i++)
-        {
-            char c = lead[i];
-            if (!char.IsLetter(c) && c != '\'' && c != '-')
-                return trimmed;
-        }
-
-        return trimmed.Substring(comma + 1).TrimStart();
     }
 
     private static string FindAddressedName(string openerLine, List<AIWorkerAgent> candidates)
@@ -961,8 +551,10 @@ public class AgentConversationController : MonoBehaviour
         return null;
     }
 
-    private static void StrengthenRelationships(List<AIWorkerAgent> speakers)
+    private static void StrengthenRelationships(List<AIWorkerAgent> speakers,
+        List<SocialMemoryEntry> socialEvents, string topic)
     {
+        LLMBrainService brain = LLMBrainService.Instance;
         for (int i = 0; i < speakers.Count; i++)
         {
             if (speakers[i] == null)
@@ -973,7 +565,20 @@ public class AgentConversationController : MonoBehaviour
                     continue;
                 GetController(speakers[i])?.IncrementAffinity(speakers[j].DisplayName);
                 GetController(speakers[j])?.IncrementAffinity(speakers[i].DisplayName);
+                brain?.RecordRelationshipInteraction(
+                    speakers[i].AgentId, speakers[j].AgentId, "conversation", topic);
             }
+        }
+
+        if (brain == null || socialEvents == null)
+            return;
+        foreach (SocialMemoryEntry socialEvent in socialEvents)
+        {
+            AIWorkerAgent source = FindSpeaker(speakers, socialEvent?.sourceAgent);
+            AIWorkerAgent target = FindSpeaker(speakers, socialEvent?.targetAgent);
+            if (source != null && target != null)
+                brain.RecordRelationshipInteraction(source.AgentId, target.AgentId,
+                    socialEvent.type, socialEvent.subject);
         }
     }
 
@@ -1235,7 +840,8 @@ public class AgentConversationController : MonoBehaviour
             GetController(speaker)?.SetCooldown(seconds);
     }
 
-    private static void ReleaseAfterConversation(List<AIWorkerAgent> speakers)
+    private static void ReleaseAfterConversation(List<AIWorkerAgent> speakers,
+        bool conversationSucceeded)
     {
         if (speakers == null)
             return;
@@ -1252,6 +858,7 @@ public class AgentConversationController : MonoBehaviour
             float linger = leaveSoon
                 ? UnityEngine.Random.Range(0.3f, 1.2f)
                 : UnityEngine.Random.Range(4f, 8f);
+            speaker.CompleteConversationActivity(conversationSucceeded);
             speaker.EndSocialConversation(leaveSoon, linger);
         }
     }
@@ -1272,7 +879,16 @@ public class AgentConversationController : MonoBehaviour
 
     public static bool IsSocialSpot(OfficeActionType type)
     {
-        return type == OfficeActionType.ChatSpot || type == OfficeActionType.BreakSpot;
+        return IsRoutineSocialSpot(type)
+            || type == OfficeActionType.Printer
+            || type == OfficeActionType.Whiteboard;
+    }
+
+    public static bool IsRoutineSocialSpot(OfficeActionType type)
+    {
+        return type == OfficeActionType.ChatSpot
+            || type == OfficeActionType.BreakSpot
+            || type == OfficeActionType.MeetingRoom;
     }
 }
 

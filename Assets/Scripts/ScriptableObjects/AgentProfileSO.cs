@@ -2,6 +2,13 @@ using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
 
+[System.Serializable]
+public struct AgentActionPreference
+{
+    public OfficeActionType actionType;
+    [Range(-20f, 20f)] public float scoreModifier;
+}
+
 [CreateAssetMenu(menuName = "Another World/Agent Profile", fileName = "NewAgentProfile")]
 public class AgentProfileSO : ScriptableObject
 {
@@ -28,9 +35,10 @@ public class AgentProfileSO : ScriptableObject
     [Tooltip("Specific experiences this character may naturally remember and refer to.")]
     [TextArea(1, 3)]
     [SerializeField] private string[] memorySeeds = new string[0];
-    [Tooltip("Short, character-specific lines used to start a conversation when the LLM did not provide one. Use {name} for the coworker's name.")]
-    [TextArea(1, 3)]
-    [SerializeField] private string[] conversationStarters = new string[0];
+    [Header("Autonomous Behavior")]
+    [Tooltip("Token-free utility score adjustments that make this character prefer or avoid specific activities.")]
+    [SerializeField] private AgentActionPreference[] actionPreferences =
+        new AgentActionPreference[0];
 
     public string AgentId => agentId;
     public string DisplayName => string.IsNullOrWhiteSpace(displayName) ? agentId : displayName;
@@ -42,7 +50,6 @@ public class AgentProfileSO : ScriptableObject
     public IReadOnlyList<string> Interests => interests;
     public IReadOnlyList<string> MemorySeeds => memorySeeds;
     public string SpeechStyle => speechStyle;
-    public int ConversationStarterCount => conversationStarters != null ? conversationStarters.Length : 0;
 
     public string BuildPromptDescription()
     {
@@ -54,8 +61,6 @@ public class AgentProfileSO : ScriptableObject
         Append(description, "Traits", Join(traits));
         Append(description, "Interests", Join(interests));
         Append(description, "Speech style", speechStyle);
-        Append(description, "Established relationships", Join(relationshipNotes));
-        Append(description, "Personal history", Join(memorySeeds));
 
         return description.ToString();
     }
@@ -86,16 +91,16 @@ public class AgentProfileSO : ScriptableObject
         return score;
     }
 
-    public string GetConversationStarter(string partnerName, int variation)
+    public float GetActionPreference(OfficeActionType actionType)
     {
-        if (conversationStarters == null || conversationStarters.Length == 0)
-            return "Do you have a minute, {name}?".Replace("{name}", partnerName);
+        if (actionPreferences == null)
+            return 0f;
 
-        int index = Mathf.Abs(variation % conversationStarters.Length);
-        string starter = conversationStarters[index];
-        return string.IsNullOrWhiteSpace(starter)
-            ? "Do you have a minute, {name}?".Replace("{name}", partnerName)
-            : starter.Trim().Replace("{name}", partnerName);
+        float result = 0f;
+        foreach (AgentActionPreference preference in actionPreferences)
+            if (preference.actionType == actionType)
+                result += preference.scoreModifier;
+        return result;
     }
 
     private static void Append(StringBuilder target, string label, string value)

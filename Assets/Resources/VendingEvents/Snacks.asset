@@ -15,6 +15,7 @@ MonoBehaviour:
   eventId: vending_drop
   displayName: Vending Treat
   description: A coffee or snack appears for a moment.
+  characterReaction: A real vending choice just appeared inside our world.
   icon: {fileID: 0}
   dropSprite: {fileID: 0}
   dropSprites:

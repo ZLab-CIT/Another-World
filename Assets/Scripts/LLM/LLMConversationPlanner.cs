@@ -7,133 +7,28 @@ using UnityEngine;
 public class LLMConversationPlanner
 {
     private readonly LLMBrainService brain;
-    private readonly ILLMBackend backend;
 
-    public LLMConversationPlanner(LLMBrainService brain, ILLMBackend backend)
+    public LLMConversationPlanner(LLMBrainService brain)
     {
         this.brain = brain;
-        this.backend = backend;
-    }
-
-    public async Task<ConversationPlan> PlanConversationAsync(
-        string agentId,
-        OfficeActionType location,
-        List<ConversationParticipantContext> coworkers,
-        string relationships,
-        string currentState,
-        int memoryLines,
-        float temperature,
-        int requestTimeoutSeconds,
-        int conversationPlanTimeoutSeconds)
-    {
-        AgentProfile profile = brain.GetProfile(agentId);
-        if (backend == null || profile == null || coworkers == null || coworkers.Count == 0)
-            return null;
-
-        try
-        {
-            string who = TextUtils.DisplayName(profile, agentId);
-            string candidateNames = TextUtils.JoinParticipantNames(coworkers);
-            StringBuilder context = new();
-            context.Append("Location: ").Append(location == OfficeActionType.BreakSpot
-                ? "a shared break area" : "an office chat area").AppendLine();
-            if (!string.IsNullOrWhiteSpace(currentState))
-                context.Append("How you feel right now: ").Append(currentState.Trim()).AppendLine();
-            if (!string.IsNullOrWhiteSpace(relationships))
-                context.Append("Your relationships: ").Append(relationships.Trim()).AppendLine();
-            context.AppendLine("Available coworkers:");
-            foreach (ConversationParticipantContext coworker in coworkers)
-            {
-                if (coworker == null || string.IsNullOrWhiteSpace(coworker.displayName))
-                    continue;
-                AgentProfile coworkerProfile = brain.GetProfile(coworker.agentId);
-                context.Append("- ").Append(coworker.displayName).Append(": ")
-                    .Append(coworkerProfile != null ? coworkerProfile.personality : "coworker");
-                if (!string.IsNullOrWhiteSpace(coworker.relationships))
-                    context.Append(" Relationship: ").Append(coworker.relationships.Trim());
-                context.AppendLine();
-            }
-            TextUtils.AppendRecentMemory(context, profile, Mathf.Max(2, memoryLines));
-            TextUtils.AppendSocialMemory(context, profile, Mathf.Max(2, memoryLines));
-            TextUtils.AppendWorldEvents(context, brain.WorldEvents, 3);
-            TextUtils.AppendRecentList(context, "Subjects you recently discussed; choose something different:",
-                profile.recentTopics, 6);
-            TextUtils.AppendRecentList(context, "Openings you recently used; do not paraphrase them:",
-                profile.recentOpenings, 6);
-
-            List<ChatMessage> messages = new()
-            {
-                new ChatMessage("system",
-                    "Plan one believable conversation for an office-life simulation. You are " + who + ". " +
-                    profile.personality + " Choose a coworker and a specific subject this person would genuinely bring up now. " +
-                    "Ground it in a personal interest, an established memory, that relationship, or a recent shared event. " +
-                    "Do not use vague invitations, generic check-ins, motivational language, or a recently used subject. " +
-                    "Use simple everyday English. The opening must be one sentence of 4 to 12 words and give the other person something concrete to answer. " +
-                    "Express only one idea. Avoid metaphors, abstract advice, corporate language, semicolons, and long explanations. " +
-                    "Do not invent a past event as fact. Respond only as JSON: " +
-                    "{\"targetAgent\":string,\"topic\":string,\"openingLine\":string}. " +
-                    "Use each key exactly once. If the opening uses a name, it must be the target's name, never your own. " +
-                    "targetAgent must be exactly one of: " + candidateNames + "."),
-                new ChatMessage("user", context.ToString())
-            };
-
-            LLMOptions options = new()
-            {
-                requestLabel = "ConversationPlan",
-                temperature = Mathf.Clamp(temperature, 0.65f, 0.85f),
-                maxTokens = 120,
-                jsonMode = true,
-                structuredSchema = LLMJsonSchema.ConversationPlan,
-                timeoutSeconds = Mathf.Min(requestTimeoutSeconds, conversationPlanTimeoutSeconds),
-                maxRetries = 1,
-                retryBaseDelaySeconds = 1.5f
-            };
-            const int maxPlanAttempts = 2;
-            for (int attempt = 0; attempt < maxPlanAttempts; attempt++)
-            {
-                string raw = await backend.CompleteAsync(messages, options);
-                ConversationPlan plan = ParseConversationPlan(raw);
-                string rejection = ValidateConversationPlan(plan, profile, coworkers, who,
-                    candidateNames, out ConversationPlan validated);
-                if (rejection != null)
-                {
-                    if (!string.IsNullOrWhiteSpace(raw))
-                        Debug.LogWarning("[Conversation plan rejected] " + who + ": " + rejection);
-                    if (attempt < maxPlanAttempts - 1)
-                    {
-                        messages.Add(new ChatMessage("user",
-                            "Your previous plan was rejected: " + rejection +
-                            ". Choose a different coworker, a more distinct subject, or a different opening angle."));
-                        await Task.Delay(500);
-                        continue;
-                    }
-                    return null;
-                }
-                return validated;
-            }
-            return null;
-        }
-        catch (Exception exception)
-        {
-            Debug.LogWarning(nameof(LLMBrainService) + " conversation planning failed for " +
-                agentId + ": " + exception.Message);
-            return null;
-        }
     }
 
     public async Task<ConversationScript> GenerateConversationAsync(
         List<ConversationParticipantContext> participants,
         string openingSpeaker,
-        string openingLine,
         string topic,
         List<string> speakerOrder,
-        int memoryLines,
         float temperature,
         int requestTimeoutSeconds,
         int conversationScriptTimeoutSeconds)
     {
-        if (backend == null || participants == null || participants.Count < 2
+        if (participants == null || participants.Count < 2
             || speakerOrder == null || speakerOrder.Count == 0)
+            return null;
+        ConversationParticipantContext initiator =
+            TextUtils.FindParticipant(participants, openingSpeaker);
+        ILLMBackend activeBackend = brain.GetBackendForAgent(initiator?.agentId);
+        if (activeBackend == null)
             return null;
 
         try
@@ -147,24 +42,26 @@ public class LLMConversationPlanner
                     continue;
                 AgentProfile profile = brain.GetProfile(participant.agentId);
                 cast.Append("- ").Append(participant.displayName).Append(": ")
-                    .Append(profile != null ? profile.personality : "office coworker");
+                    .Append(profile != null && !string.IsNullOrWhiteSpace(profile.conversationStyle)
+                        ? profile.conversationStyle
+                        : profile != null ? profile.personality : "office coworker");
                 if (!string.IsNullOrWhiteSpace(participant.relationships))
                     cast.Append(" Current relationships: ").Append(participant.relationships.Trim());
+                if (!string.IsNullOrWhiteSpace(participant.currentState))
+                    cast.Append(" Current state: ").Append(participant.currentState.Trim());
                 cast.AppendLine();
                 if (profile != null)
                 {
                     TextUtils.AppendRecentMemory(cast, profile, 1, participant.displayName);
-                    TextUtils.AppendSocialMemory(cast, profile, 2, participant.displayName);
-                    TextUtils.AppendRecentList(cast, participant.displayName +
-                        "'s recent phrases; do not repeat them:",
-                        profile.recentUtterances, 2);
+                    TextUtils.AppendSocialMemory(cast, profile, 1, participant.displayName);
                 }
             }
-            TextUtils.AppendWorldEvents(cast, brain.WorldEvents, 2);
-            TextUtils.AppendRecentList(cast, "Recent lines heard anywhere in the office; do not reuse or lightly paraphrase:",
-                brain.RecentGlobalUtterances, 8);
-            TextUtils.AppendRecentList(cast, "Recent office conversation subjects; choose a different angle:",
-                brain.RecentGlobalTopics, 6);
+            TextUtils.AppendWorldEvents(cast, brain.WorldEvents, 1);
+            cast.Append("Current world time: ").Append(brain.ScheduleContext).AppendLine();
+            TextUtils.AppendRecentList(cast, "Do not repeat these recent lines:",
+                brain.RecentGlobalUtterances, 3);
+            TextUtils.AppendRecentList(cast, "Avoid these recent subjects:",
+                brain.RecentGlobalTopics, 3);
 
             StringBuilder order = new();
             for (int i = 0; i < speakerOrder.Count; i++)
@@ -175,41 +72,37 @@ public class LLMConversationPlanner
             List<ChatMessage> messages = new()
             {
                 new ChatMessage("system",
-                    "Write the complete continuation of one natural face-to-face workplace conversation. " +
-                    "Return one turn for every speaker in the assigned order. Keep the exchange broadly on the established subject, " +
-                    "but allow natural reactions, questions, pronouns, thanks, jokes, hesitation, and disagreement. " +
-                    "Keep the same people and established facts, and make each character sound like their profile. " +
-                    "Use simple everyday spoken English. Prefer one short sentence per turn and avoid long explanations. " +
-                    "Characters may naturally mention ordinary off-screen objects, food, hobbies, and places that enrich the imagined office world. " +
-                    "A private social memory belongs only to the named character until they choose to say it aloud. " +
-                    "Do not invent shared history, switch roles, narrate actions, or mention AI. " +
-                    "The final turn must close the exchange with a statement, acknowledgment, decision, or farewell. The final turn must not end with a question. " +
-                    "Also extract up to two explicit social events stated in the conversation. Allowed event types are secret, gossip, promise, favor_request, favor_done, plan, and invitation. " +
-                    "Do not infer an event from ordinary chat. For each event, speaker and target must be character names, subject must be a short concrete fact or commitment, and private is true only when it was presented as confidential. " +
-                    "Return an empty socialEvents array when there is no explicit event. Return only JSON in this form: " +
-                    "{\"turns\":[{\"speaker\":string,\"line\":string}],\"socialEvents\":[{\"type\":string,\"speaker\":string,\"target\":string,\"subject\":string,\"private\":bool}]}." +
-                    " The turns array must have exactly " + speakerOrder.Count + " entries in the assigned order."),
+                    "Write a natural spoken office conversation, including the initiating character's opening. " +
+                    "Choose a specific subject from current state, memory, relationship, time, or a world event. " +
+                    "Use each profile's voice, established facts, and simple short English. " +
+                    "React, question, joke, disagree, or decide instead of explaining. " +
+                    "Never narrate actions, mention AI, invent shared history, or introduce absent coworkers. " +
+                    "The last turn closes the exchange and is not a question. " +
+                    "Extract only explicit secret, gossip, promise, favor_request, favor_done, plan, invitation, or conflict events; otherwise use an empty array. " +
+                    "The openingLine is spoken by the named initiator to the other participant, is 4-18 words, and must not address the initiator by their own name. " +
+                    "Return JSON only: {\"openingLine\":string,\"turns\":[{\"speaker\":string,\"line\":string}],\"socialEvents\":[{\"type\":string,\"speaker\":string,\"target\":string,\"subject\":string,\"private\":bool}]}. " +
+                    "Always include all three top-level keys. Never omit turns or socialEvents. " +
+                    "Return exactly " + speakerOrder.Count + " turns in the assigned order."),
                 new ChatMessage("user",
-                    cast + "Conversation fact: " + openingSpeaker + " initiated this subject and said the opening line. " +
-                    "Do not transfer " + openingSpeaker + "'s actions or memories to somebody else.\n" +
-                    "Established subject: " + topic + "\n" + openingSpeaker + " said: \"" + openingLine +
-                    "\"\nSpeaker order for the remaining dialogue:\n" + order)
+                    cast + (string.IsNullOrWhiteSpace(topic)
+                        ? "" : "Situation or commitment to address: " + topic + "\n") +
+                    "Initiator: " + openingSpeaker + "\nNext speakers after the opening:\n" + order)
             };
 
             LLMOptions options = new()
             {
                 requestLabel = "ConversationScript",
                 temperature = Mathf.Clamp(temperature, 0.55f, 0.72f),
-                maxTokens = Mathf.Clamp(42 * speakerOrder.Count + 60, 180, 260),
+                maxTokens = Mathf.Clamp(38 * speakerOrder.Count + 45, 150, 230),
                 jsonMode = true,
-                structuredSchema = LLMJsonSchema.ConversationScript,
                 timeoutSeconds = Mathf.Min(requestTimeoutSeconds, conversationScriptTimeoutSeconds),
                 maxRetries = 0
             };
 
-            string raw = await backend.CompleteAsync(messages, options);
+            string raw = await activeBackend.CompleteAsync(messages, options);
             ConversationScript script = ParseConversationScript(raw, participants,
-                speakerOrder, openingSpeaker, openingLine, names, out string repairSummary);
+                speakerOrder, openingSpeaker, topic,
+                names, out string repairSummary);
             if (!string.IsNullOrWhiteSpace(repairSummary))
                 Debug.LogWarning("[Conversation script repaired] " + names + ": " + repairSummary);
             return script;
@@ -220,6 +113,178 @@ public class LLMConversationPlanner
                 exception.Message);
             return null;
         }
+    }
+
+    public async Task<PreparedStoryConversation> GenerateStoryConversationAsync(
+        ConversationParticipantContext speaker,
+        ConversationParticipantContext target,
+        string storyTitle,
+        string establishedFact,
+        int stage,
+        string priorOutcome,
+        float temperature,
+        int requestTimeoutSeconds,
+        int conversationScriptTimeoutSeconds)
+    {
+        if (speaker == null || target == null)
+            return null;
+        ILLMBackend activeBackend = brain.GetBackendForAgent(speaker.agentId);
+        if (activeBackend == null)
+            return null;
+
+        AgentProfile speakerProfile = brain.GetProfile(speaker.agentId);
+        AgentProfile targetProfile = brain.GetProfile(target.agentId);
+        if (speakerProfile == null || targetProfile == null)
+            return null;
+
+        string[] order =
+        {
+            speaker.displayName, target.displayName,
+            speaker.displayName, target.displayName
+        };
+        string stageInstruction = stage <= 0
+            ? "Introduce the event and create a concrete question, suspicion, or plan."
+            : stage == 1
+                ? "Act on the earlier event: investigate it, carry out the plan, or discover a complication."
+                : "Resolve the event with a result, consequence, changed opinion, or new shared fact.";
+        StringBuilder context = new();
+        context.Append("World time: ").Append(brain.ScheduleContext).AppendLine();
+        context.Append("Story: ").Append(storyTitle).AppendLine();
+        context.Append("Established fact: ").Append(establishedFact).AppendLine();
+        context.Append("Stage: ").Append(stage).AppendLine();
+        context.Append("Stage objective: ").Append(stageInstruction).AppendLine();
+        if (!string.IsNullOrWhiteSpace(priorOutcome))
+            context.Append("Previous outcome: ").Append(priorOutcome).AppendLine();
+        context.Append(speaker.displayName).Append(": ")
+            .Append(speakerProfile.conversationStyle).Append(" State: ")
+            .Append(speaker.currentState).AppendLine();
+        context.Append(target.displayName).Append(": ")
+            .Append(targetProfile.conversationStyle).Append(" State: ")
+            .Append(target.currentState).AppendLine();
+        context.Append("Relationship: ")
+            .Append(brain.BuildRelationshipContext(speaker.agentId, target.agentId));
+        TextUtils.AppendRecentList(context,
+            "Recent office lines that must not be repeated:",
+            brain.RecentGlobalUtterances, 6);
+
+        List<ChatMessage> messages = new()
+        {
+            new ChatMessage("system",
+                "You write one short scene in a persistent office simulation. "
+                + "The simulation supplied the facts, participants, relationship, needs, time, and story stage. "
+                + "Do not alter those facts or invent history, absent coworkers, interns, managers, clients, or prior meetings. "
+                + "Only the two assigned speakers may be mentioned. Stay on exactly one subject. "
+                + "Make the exchange specific, surprising, and consequential: "
+                + "the characters should disagree, reveal a preference, make a decision, or create a concrete next step. "
+                + "Do not use generic check-ins, motivational language, exposition, narration, or AI references. "
+                + "Use concise everyday spoken English and preserve each character's style. Each line must contain 5 to 18 words and one idea. "
+                + "Return exactly four turns in this speaker order: "
+                + string.Join(", ", order) + ". The first turn must immediately introduce the established fact. "
+                + "The last turn must close with a decision or reaction, not a question. "
+                + "memory must be one factual sentence describing what changed because of this scene. "
+                + "Extract at most one explicit social event using type secret, gossip, promise, "
+                + "favor_request, favor_done, plan, invitation, or conflict. "
+                + "Return only JSON: {\"topic\":string,\"memory\":string,"
+                + "\"turns\":[{\"speaker\":string,\"line\":string}],"
+                + "\"socialEvents\":[{\"type\":string,\"speaker\":string,"
+                + "\"target\":string,\"subject\":string,\"private\":bool}]}"),
+            new ChatMessage("user", context.ToString())
+        };
+        LLMOptions options = new()
+        {
+            requestLabel = "StoryScene:" + storyTitle,
+            temperature = Mathf.Clamp(temperature, 0.72f, 0.9f),
+            maxTokens = 300,
+            jsonMode = true,
+            highPriority = true,
+            timeoutSeconds = Mathf.Min(requestTimeoutSeconds,
+                conversationScriptTimeoutSeconds),
+            maxRetries = 0
+        };
+
+        try
+        {
+            string raw = await activeBackend.CompleteAsync(messages, options);
+            string json = TextUtils.ExtractJson(raw);
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+            ConversationScriptDTO dto = JsonUtility.FromJson<ConversationScriptDTO>(json);
+            StorySceneDTO scene = JsonUtility.FromJson<StorySceneDTO>(json);
+            if (dto?.turns == null || dto.turns.Length != order.Length || scene == null)
+                return null;
+
+            List<ConversationParticipantContext> participants = new() { speaker, target };
+            List<ConversationTurn> allTurns = new();
+            for (int i = 0; i < order.Length; i++)
+            {
+                ConversationTurnDTO rawTurn = dto.turns[i];
+                if (rawTurn == null || !string.Equals(rawTurn.speaker?.Trim(), order[i],
+                        StringComparison.OrdinalIgnoreCase))
+                    return null;
+                string line = CleanGeneratedTurn(rawTurn.line, order[i],
+                    speaker.displayName + ", " + target.displayName, out _);
+                if (string.IsNullOrWhiteSpace(line)
+                    || TextUtils.CountWords(line) > 20
+                    || MentionsUnsupportedStoryFact(line, establishedFact)
+                    || MentionsOtherKnownCharacter(line, speaker, target)
+                    || TextUtils.IsSimilarToAny(line, brain.RecentGlobalUtterances, 0.82f)
+                    || (i == order.Length - 1 && IsQuestionLine(line)))
+                    return null;
+                allTurns.Add(new ConversationTurn { speaker = order[i], line = line });
+            }
+
+            string opening = allTurns[0].line;
+            allTurns.RemoveAt(0);
+            ConversationScript continuation = BuildConversationScript(allTurns,
+                dto.socialEvents, participants, speaker.displayName, opening);
+            return new PreparedStoryConversation
+            {
+                topic = TextUtils.CleanTopic(scene.topic),
+                openingLine = opening,
+                memory = TextUtils.CleanShortText(scene.memory, 28),
+                continuation = continuation
+            };
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning("Story scene generation failed: " + exception.Message);
+            return null;
+        }
+    }
+
+    private bool MentionsOtherKnownCharacter(string line,
+        ConversationParticipantContext speaker, ConversationParticipantContext target)
+    {
+        HashSet<AgentProfile> unique = new(brain.Profiles.Values);
+        foreach (AgentProfile profile in unique)
+        {
+            string name = profile?.displayName;
+            if (string.IsNullOrWhiteSpace(name)
+                || string.Equals(name, speaker.displayName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, target.displayName, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (TextUtils.ContainsIgnoreCase(line, name))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool MentionsUnsupportedStoryFact(string line, string establishedFact)
+    {
+        string[] unsupportedRoles = { "intern", "manager", "boss", "client", "visitor" };
+        foreach (string role in unsupportedRoles)
+            if (TextUtils.ContainsIgnoreCase(line, role))
+                return true;
+
+        string[] unsupportedHistory =
+        {
+            "yesterday", "last week", "friday", "monday", "meeting"
+        };
+        foreach (string history in unsupportedHistory)
+            if (TextUtils.ContainsIgnoreCase(line, history)
+                && !TextUtils.ContainsIgnoreCase(establishedFact, history))
+                return true;
+        return false;
     }
 
     public async Task<List<string>> GenerateEventMonologueAsync(
@@ -233,7 +298,8 @@ public class LLMConversationPlanner
         int conversationScriptTimeoutSeconds)
     {
         AgentProfile profile = brain.GetProfile(agentId);
-        if (backend == null || profile == null)
+        ILLMBackend activeBackend = brain.GetBackendForAgent(agentId);
+        if (activeBackend == null || profile == null)
             return null;
 
         lineCount = Mathf.Clamp(lineCount, 1, 4);
@@ -241,9 +307,9 @@ public class LLMConversationPlanner
         StringBuilder context = new();
         if (!string.IsNullOrWhiteSpace(eventContext))
             context.AppendLine(eventContext.Trim());
-        TextUtils.AppendRecentMemory(context, profile, Mathf.Max(2, memoryLines));
-        TextUtils.AppendSocialMemory(context, profile, Mathf.Max(2, memoryLines));
-        TextUtils.AppendWorldEvents(context, brain.WorldEvents, 3);
+        TextUtils.AppendRecentMemory(context, profile, 1);
+        TextUtils.AppendSocialMemory(context, profile, 1);
+        TextUtils.AppendWorldEvents(context, brain.WorldEvents, 1);
 
         try
         {
@@ -268,13 +334,13 @@ public class LLMConversationPlanner
                 temperature = Mathf.Clamp(temperature, 0.6f, 0.78f),
                 maxTokens = Mathf.Clamp(40 * lineCount + 40, 120, 180),
                 jsonMode = true,
-                structuredSchema = LLMJsonSchema.ConversationScript,
+                highPriority = true,
                 timeoutSeconds = Mathf.Min(12, Mathf.Min(requestTimeoutSeconds,
                     conversationScriptTimeoutSeconds)),
                 maxRetries = 0
             };
 
-            string raw = await backend.CompleteAsync(messages, options);
+            string raw = await activeBackend.CompleteAsync(messages, options);
             string json = TextUtils.ExtractJson(raw);
             if (string.IsNullOrWhiteSpace(json))
                 return null;
@@ -476,89 +542,17 @@ public class LLMConversationPlanner
         }
     }
 
-    private static ConversationPlan ParseConversationPlan(string raw)
-    {
-        if (TextUtils.CountOccurrences(raw, "\"targetAgent\"") != 1
-            || TextUtils.CountOccurrences(raw, "\"topic\"") != 1
-            || TextUtils.CountOccurrences(raw, "\"openingLine\"") != 1)
-            return null;
-        string json = TextUtils.ExtractJson(raw);
-        if (string.IsNullOrWhiteSpace(json))
-            return null;
-        try
-        {
-            ConversationPlanDTO dto = JsonUtility.FromJson<ConversationPlanDTO>(json);
-            if (dto == null)
-                return null;
-            return new ConversationPlan
-            {
-                targetAgent = dto.targetAgent,
-                topic = dto.topic,
-                openingLine = dto.openingLine
-            };
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string ValidateConversationPlan(ConversationPlan plan, AgentProfile profile,
-        List<ConversationParticipantContext> coworkers, string speakerName, string participantNames,
-        out ConversationPlan validated)
-    {
-        validated = null;
-        if (plan == null)
-            return "response was not valid conversation-plan JSON";
-
-        ConversationParticipantContext target = TextUtils.FindParticipant(coworkers, plan.targetAgent);
-        if (target == null)
-            return "targetAgent was not one of the available coworkers";
-
-        string topic = TextUtils.CleanTopic(plan.topic);
-        if (string.IsNullOrWhiteSpace(topic))
-            return "topic was empty or too vague";
-        if (TextUtils.IsGenericTopic(topic))
-            return "topic was a generic conversation label instead of a concrete subject";
-        if (TextUtils.LooksLikePersonName(topic, coworkers))
-            return "topic was just a person's name instead of a concrete subject";
-        if (TextUtils.IsSimilarToAny(topic, profile.recentTopics, 0.7f))
-            return "topic repeated a recent subject";
-
-        string opening = TextUtils.CleanReply(plan.openingLine, speakerName, participantNames,
-            out string rejection);
-        if (string.IsNullOrWhiteSpace(opening))
-            return "opening line was unusable: " + rejection;
-        if (opening.IndexOf(speakerName, StringComparison.OrdinalIgnoreCase) >= 0)
-            return "opening addressed the initiating character instead of the coworker";
-        if (TextUtils.IsGenericOpening(opening))
-            return "opening was a generic check-in";
-        if (TextUtils.IsSimilarToAny(opening, profile.recentOpenings, 0.72f))
-            return "opening line repeated a recent opening";
-
-        int wordCount = TextUtils.CountWords(opening);
-        if (wordCount < 4 || wordCount > 24)
-            return "opening line had " + wordCount + " words instead of 4-24";
-
-        validated = new ConversationPlan
-        {
-            targetAgent = target.displayName,
-            topic = topic,
-            openingLine = opening
-        };
-        return null;
-    }
-
     private ConversationScript ParseConversationScript(string raw,
         List<ConversationParticipantContext> participants, List<string> speakerOrder,
-        string openingSpeaker, string openingLine, string participantNames,
+        string openingSpeaker, string topicSeed,
+        string participantNames,
         out string repairSummary)
     {
         repairSummary = null;
         string json = TextUtils.ExtractJson(raw);
         if (string.IsNullOrWhiteSpace(json))
         {
-            repairSummary = "empty or non-JSON response; using local dialogue";
+            repairSummary = "empty or non-JSON response; conversation omitted";
             return null;
         }
 
@@ -569,13 +563,37 @@ public class LLMConversationPlanner
         }
         catch
         {
-            repairSummary = "invalid JSON; using local dialogue";
+            repairSummary = "invalid JSON; conversation omitted";
             return null;
         }
 
         if (script == null || script.turns == null)
         {
-            repairSummary = "response contained no turns; using local dialogue";
+            repairSummary = "response contained no turns; conversation omitted";
+            return null;
+        }
+
+        string generatedOpening = CleanGeneratedTurn(script.openingLine,
+            openingSpeaker, participantNames, out string openingRejection);
+        ConversationParticipantContext openingParticipant =
+            TextUtils.FindParticipant(participants, openingSpeaker);
+        AgentProfile openingProfile = openingParticipant != null
+            ? brain.GetProfile(openingParticipant.agentId) : null;
+        string normalizedOpening = TextUtils.NormalizeForComparison(generatedOpening);
+        string normalizedSpeaker = TextUtils.NormalizeForComparison(openingSpeaker);
+        bool addressesSelf = normalizedOpening.StartsWith(
+            normalizedSpeaker + " ", StringComparison.Ordinal);
+        if (string.IsNullOrWhiteSpace(generatedOpening)
+            || TextUtils.CountWords(generatedOpening) < 4
+            || TextUtils.CountWords(generatedOpening) > 18
+            || addressesSelf
+            || TextUtils.IsSimilarToAny(generatedOpening,
+                openingProfile?.recentOpenings, 0.78f))
+        {
+            repairSummary = "model opening was unusable"
+                + (string.IsNullOrWhiteSpace(openingRejection)
+                    ? "" : ": " + openingRejection)
+                + "; conversation omitted";
             return null;
         }
 
@@ -583,7 +601,7 @@ public class LLMConversationPlanner
         List<string> repairs = new();
         HashSet<string> conversationLines = new()
         {
-            TextUtils.NormalizeForComparison(openingLine)
+            TextUtils.NormalizeForComparison(generatedOpening)
         };
         for (int i = 0; i < speakerOrder.Count; i++)
         {
@@ -616,14 +634,14 @@ public class LLMConversationPlanner
                     bool exactRepeat = conversationLines.Contains(normalized)
                         || IsExactRecentLine(normalized, profile?.recentUtterances)
                         || IsExactRecentLine(normalized, brain.RecentGlobalUtterances);
-                    if (exactRepeat)
+                    if (exactRepeat
+                        || MentionsUnsupportedAbsentCharacter(
+                            line, participants, topicSeed))
                     {
-                        repairs.Add("turn " + (i + 1) + " exactly repeated a recent line");
-                        line = null;
-                    }
-                    else if (i == speakerOrder.Count - 1 && IsQuestionLine(line))
-                    {
-                        repairs.Add("final turn ended with a question");
+                        repairs.Add("turn " + (i + 1)
+                            + (exactRepeat
+                                ? " exactly repeated a recent line"
+                                : " invented facts about an absent coworker"));
                         line = null;
                     }
                     else
@@ -640,7 +658,54 @@ public class LLMConversationPlanner
             repairs.Add("expected " + speakerOrder.Count + " turns but received " + script.turns.Length);
         repairSummary = repairs.Count > 0 ? string.Join("; ", repairs) : null;
         return BuildConversationScript(turns, script.socialEvents, participants,
-            openingSpeaker, openingLine);
+            openingSpeaker, generatedOpening);
+    }
+
+    private bool MentionsUnsupportedAbsentCharacter(string line,
+        List<ConversationParticipantContext> participants, string topicSeed)
+    {
+        HashSet<AgentProfile> unique = new(brain.Profiles.Values);
+        foreach (AgentProfile known in unique)
+        {
+            string name = known?.displayName;
+            if (string.IsNullOrWhiteSpace(name)
+                || !TextUtils.ContainsIgnoreCase(line, name)
+                || TextUtils.FindParticipant(participants, name) != null)
+                continue;
+            if (TextUtils.ContainsIgnoreCase(topicSeed, name)
+                || ContainsNameInEstablishedContext(name, participants))
+                continue;
+            return true;
+        }
+        return false;
+    }
+
+    private bool ContainsNameInEstablishedContext(string name,
+        List<ConversationParticipantContext> participants)
+    {
+        foreach (string worldEvent in brain.WorldEvents)
+            if (TextUtils.ContainsIgnoreCase(worldEvent, name))
+                return true;
+
+        foreach (ConversationParticipantContext participant in participants)
+        {
+            AgentProfile profile = participant != null
+                ? brain.GetProfile(participant.agentId) : null;
+            if (profile == null)
+                continue;
+            foreach (string memory in profile.memory)
+                if (TextUtils.ContainsIgnoreCase(memory, name))
+                    return true;
+            foreach (SocialMemoryEntry socialMemory in profile.socialMemory)
+                if (socialMemory != null
+                    && (TextUtils.ContainsIgnoreCase(socialMemory.subject, name)
+                        || string.Equals(socialMemory.sourceAgent, name,
+                            StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(socialMemory.targetAgent, name,
+                            StringComparison.OrdinalIgnoreCase)))
+                    return true;
+        }
+        return false;
     }
 
     private static bool IsExactRecentLine(string normalized, List<string> recentLines)
@@ -703,6 +768,7 @@ public class LLMConversationPlanner
         string openingSpeaker, string openingLine)
     {
         ConversationScript result = new();
+        result.openingLine = openingLine;
         result.turns.AddRange(turns);
         if (rawEvents == null || rawEvents.Length == 0)
             return result;
@@ -734,7 +800,8 @@ public class LLMConversationPlanner
         string type = raw.type.Trim().ToLowerInvariant();
         string[] allowedTypes =
         {
-            "secret", "gossip", "promise", "favor_request", "favor_done", "plan", "invitation"
+            "secret", "gossip", "promise", "favor_request", "favor_done",
+            "plan", "invitation", "conflict"
         };
         if (Array.IndexOf(allowedTypes, type) < 0)
             return null;
@@ -793,19 +860,21 @@ public class LLMConversationPlanner
         return false;
     }
 
-    [Serializable]
-    private class ConversationPlanDTO
-    {
-        public string targetAgent;
-        public string topic;
-        public string openingLine;
-    }
-
+    // JsonUtility assigns these fields through reflection.
+#pragma warning disable CS0649
     [Serializable]
     private class ConversationScriptDTO
     {
+        public string openingLine;
         public ConversationTurnDTO[] turns;
         public SocialEventDTO[] socialEvents;
+    }
+
+    [Serializable]
+    private class StorySceneDTO
+    {
+        public string topic;
+        public string memory;
     }
 
     [Serializable]
@@ -824,4 +893,5 @@ public class LLMConversationPlanner
         public string subject;
         public bool @private;
     }
+#pragma warning restore CS0649
 }

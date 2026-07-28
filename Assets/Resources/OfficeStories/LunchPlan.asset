@@ -1,0 +1,23 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e10768b32f9e47d69dd709141a1266f3, type: 3}
+  m_Name: LunchPlan
+  m_EditorClassIdentifier:
+  storyId: lunch_plan
+  title: Lunch Plan
+  kind: 3
+  weight: 1.2
+  topic: choosing somewhere new for lunch instead of repeating yesterday
+  memory: '{speaker} and {target} started making a new lunch plan.'
+  publicAnnouncement: 0
+  followUpDelaySeconds: 45
+  followUpMemory: '{speaker} and {target} followed through on their lunch-break plan.'

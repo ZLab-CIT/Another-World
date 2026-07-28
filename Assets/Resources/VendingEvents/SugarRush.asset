@@ -8,6 +8,7 @@ MonoBehaviour:
   eventId: sugar_rush
   displayName: Sugar Rush
   description: A quick focus spike - then a crash.
+  characterReaction: This is either brilliant focus or a terrible future crash.
   focusChange: 25
   speedMultiplier: 1.5
   speedBuffDuration: 20

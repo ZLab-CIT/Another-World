@@ -37,12 +37,10 @@ MonoBehaviour:
   - His dog once stepped on the keyboard and changed a test while he was debugging.
   - He keeps a notebook of game mechanics that sound ridiculous until prototyped.
   - An accidental change once fixed one bug while creating two stranger ones.
-  conversationStarters:
-  - "{name}, my dog interrupted another debugging session last night."
-  - "{name}, I have a strange game mechanic idea and need a second opinion."
-  - "{name}, have you ever fixed a bug by accidentally making it worse first?"
-  - "{name}, I wrote down a game idea at two in the morning and now I cannot read my handwriting."
-  - "{name}, my dog has started treating keyboard sounds like an invitation."
-  - "{name}, would you play a game where losing unlocks the interesting story?"
-  - "{name}, I found the bug. Unfortunately, it was the part I was proud of."
-  - "{name}, what tiny feature makes a game impossible for you to put down?"
+  actionPreferences:
+  - actionType: 0
+    scoreModifier: 5
+  - actionType: 8
+    scoreModifier: 5
+  - actionType: 4
+    scoreModifier: -2

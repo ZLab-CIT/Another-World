@@ -40,13 +40,10 @@ MonoBehaviour:
   - She once chose a difficult KTV song and stubbornly finished it despite missing
     the high notes.
   - A tiny wording change once rescued a post that the team thought would fail.
-  conversationStarters:
-  - '{name}, have you noticed what everyone in the office is suddenly talking about?'
-  - '{name}, I may have found our next KTV anthem.'
-  - '{name}, my sister sent me a trend I cannot stop thinking about.'
-  - '{name}, one comment under today''s post made me laugh at exactly the wrong moment.'
-  - '{name}, would you trust a caption that sounds clever but explains absolutely
-    nothing?'
-  - '{name}, I nearly published the draft with my private note still in the title.'
-  - '{name}, choose carefully: dramatic KTV duet or a song neither of us can ruin?'
-  - '{name}, the office chat has gone suspiciously quiet. What did I miss?'
+  actionPreferences:
+  - actionType: 4
+    scoreModifier: 5
+  - actionType: 8
+    scoreModifier: 3
+  - actionType: 0
+    scoreModifier: 2

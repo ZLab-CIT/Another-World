@@ -27,25 +27,15 @@ public class LLMOptions
     public float temperature = 0.8f;
     public int maxTokens = 256;
     public bool jsonMode = false;
-    public LLMJsonSchema structuredSchema = LLMJsonSchema.None;
+    public bool highPriority = false;
     public int timeoutSeconds = 30;
     public int maxRetries = 2;
     public float retryBaseDelaySeconds = 2f;
     public CancellationToken cancellationToken = CancellationToken.None;
 }
 
-public enum LLMJsonSchema
-{
-    None,
-    ConversationPlan,
-    ConversationScript,
-    ActivityPlan
-}
-
 public interface ILLMBackend
 {
-    bool IsAvailable { get; }
-
     Task<string> CompleteAsync(List<ChatMessage> messages, LLMOptions options = null);
 }
 
@@ -54,9 +44,8 @@ public class OpenAICompatibleBackend : ILLMBackend
     private readonly string baseUrl;
     private readonly string apiKey;
     private readonly string model;
+    private readonly SemaphoreSlim requestGate = new(1, 1);
     private DateTime cooldownUntilUtc = DateTime.MinValue;
-
-    public bool IsAvailable => true;
 
     public OpenAICompatibleBackend(string baseUrl, string apiKey, string model)
     {
@@ -68,6 +57,34 @@ public class OpenAICompatibleBackend : ILLMBackend
     public async Task<string> CompleteAsync(List<ChatMessage> messages, LLMOptions options = null)
     {
         options ??= new LLMOptions();
+        bool entered;
+        try
+        {
+            int waitMilliseconds = options.highPriority ? 1500 : 150;
+            entered = await requestGate.WaitAsync(waitMilliseconds,
+                options.cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+
+        if (!entered)
+            return null;
+
+        try
+        {
+            return await CompleteRequestAsync(messages, options);
+        }
+        finally
+        {
+            requestGate.Release();
+        }
+    }
+
+    private async Task<string> CompleteRequestAsync(List<ChatMessage> messages,
+        LLMOptions options)
+    {
         string logPrefix = "[LLM " + (string.IsNullOrWhiteSpace(options.requestLabel)
             ? "Request" : options.requestLabel.Trim()) + "] ";
         if (options.cancellationToken.IsCancellationRequested)
@@ -88,7 +105,7 @@ public class OpenAICompatibleBackend : ILLMBackend
         json = ReplaceTemperatureJson(json, payload.temperature);
         List<string> extraPayloadFields = new();
         if (options.jsonMode)
-            extraPayloadFields.Add("\"response_format\":" + BuildResponseFormat(options.structuredSchema));
+            extraPayloadFields.Add("\"response_format\":{\"type\":\"json_object\"}");
         if (IsGlmModel())
             extraPayloadFields.Add("\"thinking\":{\"type\":\"disabled\"}");
 
@@ -103,6 +120,10 @@ public class OpenAICompatibleBackend : ILLMBackend
             string responseBody;
             string requestError;
             string retryAfter;
+            string remainingRequests;
+            string remainingTokens;
+            string requestReset;
+            string tokenReset;
             UnityWebRequest.Result result;
 
             using (UnityWebRequest req = new(baseUrl + "/chat/completions", "POST"))
@@ -119,6 +140,12 @@ public class OpenAICompatibleBackend : ILLMBackend
                 responseBody = req.downloadHandler != null ? req.downloadHandler.text : "";
                 requestError = req.error;
                 retryAfter = req.GetResponseHeader("Retry-After");
+                remainingRequests =
+                    req.GetResponseHeader("x-ratelimit-remaining-requests");
+                remainingTokens =
+                    req.GetResponseHeader("x-ratelimit-remaining-tokens");
+                requestReset = req.GetResponseHeader("x-ratelimit-reset-requests");
+                tokenReset = req.GetResponseHeader("x-ratelimit-reset-tokens");
             }
 
             if (result != UnityWebRequest.Result.Success)
@@ -154,7 +181,9 @@ public class OpenAICompatibleBackend : ILLMBackend
                 string failureMessage = logPrefix + nameof(OpenAICompatibleBackend) + " request failed (" +
                     responseCode + "): " + requestError +
                     (responseCode == 429 || timedOut
-                        ? " Requests will temporarily use local fallback." : "") +
+                        ? " Model-written scenes are temporarily paused." : "") +
+                    FormatRateLimitStatus(remainingRequests, remainingTokens,
+                        requestReset, tokenReset) +
                     (string.IsNullOrWhiteSpace(responseBody) ? "" : "\n" + responseBody);
                 if (serviceOverloaded)
                     Debug.Log(failureMessage);
@@ -184,7 +213,9 @@ public class OpenAICompatibleBackend : ILLMBackend
             {
                 Debug.Log(logPrefix + nameof(OpenAICompatibleBackend) + " token usage: prompt=" +
                     resp.usage.prompt_tokens + ", completion=" + resp.usage.completion_tokens +
-                    ", total=" + resp.usage.total_tokens);
+                    ", total=" + resp.usage.total_tokens
+                    + FormatRateLimitStatus(remainingRequests, remainingTokens,
+                        requestReset, tokenReset));
             }
 
             return content;
@@ -222,6 +253,17 @@ public class OpenAICompatibleBackend : ILLMBackend
         return Mathf.Min(30f, exponential + jitter);
     }
 
+    private static string FormatRateLimitStatus(string remainingRequests,
+        string remainingTokens, string requestReset, string tokenReset)
+    {
+        if (string.IsNullOrWhiteSpace(remainingRequests)
+            && string.IsNullOrWhiteSpace(remainingTokens))
+            return "";
+        return " | provider remaining requests=" + (remainingRequests ?? "?")
+            + " (reset " + (requestReset ?? "?") + "), tokens="
+            + (remainingTokens ?? "?") + " (reset " + (tokenReset ?? "?") + ")";
+    }
+
     private static async Task<bool> DelayAsync(float seconds, CancellationToken cancellationToken)
     {
         try
@@ -248,17 +290,6 @@ public class OpenAICompatibleBackend : ILLMBackend
     private static Task<UnityWebRequest.Result> WebRequestTask(UnityWebRequest req, CancellationToken cancellationToken)
     {
         return WaitForWebRequest(req, cancellationToken);
-    }
-
-    private static string BuildResponseFormat(LLMJsonSchema schema)
-    {
-        switch (schema)
-        {
-            case LLMJsonSchema.ConversationPlan:
-            case LLMJsonSchema.ConversationScript:
-            default:
-                return "{\"type\":\"json_object\"}";
-        }
     }
 
     private bool IsGlmModel()
@@ -299,6 +330,8 @@ public class OpenAICompatibleBackend : ILLMBackend
         public bool stream;
     }
 
+    // JsonUtility assigns the response fields through reflection.
+#pragma warning disable CS0649
     [Serializable]
     private class ChatCompletionResponse
     {
@@ -326,4 +359,5 @@ public class OpenAICompatibleBackend : ILLMBackend
         public int completion_tokens;
         public int total_tokens;
     }
+#pragma warning restore CS0649
 }

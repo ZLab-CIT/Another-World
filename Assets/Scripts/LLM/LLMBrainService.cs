@@ -4,17 +4,12 @@ using System.Globalization;
 using System.Threading.Tasks;
 using UnityEngine;
 
-public sealed class ConversationPlan
-{
-    public string targetAgent;
-    public string topic;
-    public string openingLine;
-}
 public sealed class ConversationParticipantContext
 {
     public string agentId;
     public string displayName;
     public string relationships;
+    public string currentState;
 }
 
 public sealed class ConversationTurn
@@ -23,6 +18,7 @@ public sealed class ConversationTurn
     public string line;
 }
 
+[Serializable]
 public sealed class SocialMemoryEntry
 {
     public string type;
@@ -35,8 +31,17 @@ public sealed class SocialMemoryEntry
 
 public sealed class ConversationScript
 {
+    public string openingLine;
     public readonly List<ConversationTurn> turns = new();
     public readonly List<SocialMemoryEntry> socialEvents = new();
+}
+
+public sealed class PreparedStoryConversation
+{
+    public string topic;
+    public string openingLine;
+    public string memory;
+    public ConversationScript continuation;
 }
 
 public sealed class OfficeActivityPlan
@@ -58,7 +63,8 @@ public sealed class OfficeActivityPlan
     public float productivityChange;
     public string socialMemorySubject;
     public bool completesSocialCommitment;
-    public string socialOpeningLine;
+    public string companionPreparation;
+    public bool giveHeldItemToTarget;
 }
 
 public enum OfficeDestinationMode
@@ -69,11 +75,22 @@ public enum OfficeDestinationMode
     FollowAgent
 }
 
+public enum WorldSchedulePhase
+{
+    Night,
+    Morning,
+    Work,
+    Lunch,
+    Afternoon,
+    Evening
+}
+
 public class AgentProfile
 {
     public string agentId;
     public string displayName;
     public string personality;
+    public string conversationStyle;
     public string birthday;
     public readonly List<string> memory = new();
     public readonly List<SocialMemoryEntry> socialMemory = new();
@@ -90,55 +107,108 @@ public class AgentPersonalityEntry
     [TextArea] public string personality;
 }
 
+[Serializable]
+public sealed class AgentBrainEndpoint
+{
+    public string label;
+    [Tooltip("Stable agent ids assigned to this brain. Unassigned agents use the default backend.")]
+    public string[] agentIds;
+    public string baseUrl;
+    [Tooltip("Environment variable containing this brain's API key. Leave empty for a local endpoint.")]
+    public string apiKeyEnvironmentVariable;
+    public string model;
+}
+
 public class LLMBrainService : MonoBehaviour
 {
     public static LLMBrainService Instance { get; private set; }
+    private static readonly HashSet<string> LegacyFallbackUtterances =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "I see what you mean.",
+            "That sounds reasonable to me.",
+            "I had not thought about it that way.",
+            "The practical details will matter.",
+            "We can start small and see how it goes.",
+            "That gives us something useful to work with.",
+            "I think we are getting closer to an answer.",
+            "It would help to keep the plan simple.",
+            "That seems worth trying.",
+            "I can work with that idea.",
+            "Let us think through the next step.",
+            "That clears up the main concern for me.",
+            "That sounds like a good place to leave it for now.",
+            "I think we understand each other better now.",
+            "Let's pick this up again after we get some work done.",
+            "I am glad we had a chance to talk about it."
+        };
 
-    [Header("Backend (OpenAI-compatible; GLM by default)")]
-    [SerializeField] private string baseUrl = "https://api.z.ai/api/paas/v4";
-    [SerializeField] private string apiKey = "";
-    [Tooltip("Environment variable used when Api Key is empty. Checked before GLM_API_KEY, ZHIPUAI_API_KEY, and ZAI_API_KEY fallbacks.")]
-    [SerializeField] private string apiKeyEnvironmentVariable = "GLM_API_KEY";
-    [Tooltip("GLM model id. glm-4.7-flash is the free model; glm-4.7 requires account balance or a resource package.")]
-    [SerializeField] private string model = "glm-4.7-flash";
+    [Header("Backend (OpenAI-compatible; local Ollama by default)")]
+    [SerializeField] private string baseUrl = "http://localhost:11434/v1";
+    [Tooltip("Environment variable containing the API key. Leave empty for local Ollama.")]
+    [SerializeField] private string apiKeyEnvironmentVariable = "";
+    [Tooltip("Model identifier installed in Ollama or provided by a remote endpoint.")]
+    [SerializeField] private string model = "qwen2.5:1.5b";
+    [Tooltip("Optional independent providers/models. Each agent is routed to its assigned brain.")]
+    [SerializeField] private AgentBrainEndpoint[] agentBrains;
 
     [Header("Generation")]
-    [SerializeField] private float temperature = 0.8f;
+    [SerializeField] private float temperature = 0.7f;
     [Tooltip("Seconds before an LLM request is abandoned (falls back to utility AI). Set high enough to survive the first cold model load (~15-30s) plus generation.")]
-    [SerializeField] private int requestTimeoutSeconds = 60;
+    [SerializeField] private int requestTimeoutSeconds = 30;
     [Tooltip("Number of recent memory lines included in each prompt.")]
-    [SerializeField] private int memoryLines = 4;
+    [SerializeField] private int memoryLines = 2;
 
     [Header("Social")]
     [Tooltip("If on, the model writes the continuation of each conversation. Turn off for fully local dialogue.")]
     [SerializeField] private bool enableSocialReplies = true;
-    [Tooltip("If on, the model also chooses the partner, topic, and opening before travel. This costs a second request per conversation and is not recommended for small CPU-hosted models.")]
-    [SerializeField] private bool enableGeneratedConversationPlans = false;
-    [Tooltip("A generated social plan gives up quickly and uses a local character-specific plan instead.")]
-    [SerializeField, Min(2)] private int conversationPlanTimeoutSeconds = 8;
     [Tooltip("Maximum generation time for the complete three-reply conversation script.")]
     [SerializeField, Min(8)] private int conversationScriptTimeoutSeconds = 30;
+    [Tooltip("Minimum pause between ordinary model-written chats across the whole office. Featured story and vending scenes are separate.")]
+    [SerializeField, Min(15f)] private float routineConversationIntervalSeconds = 20f;
 
     [Header("Activity Planning")]
     [Tooltip("If on, the model generates short queues of office activities. Unity still validates every target and path when each activity starts.")]
     [SerializeField] private bool enableActivityPlans = true;
     [SerializeField, Range(2, 6)] private int activityBatchSize = 3;
     [Tooltip("Minimum time between activity-batch requests across every worker in the office. A longer pause reduces token bursts on CPU-hosted models.")]
-    [SerializeField, Min(2f)] private float globalActivityPlanIntervalSeconds = 12f;
+    [SerializeField, Min(2f)] private float globalActivityPlanIntervalSeconds = 20f;
     [SerializeField, Min(10)] private int activityPlanTimeoutSeconds = 30;
+
+    [Header("Persistence")]
+    [SerializeField, Min(15f)] private float stateSaveIntervalSeconds = 60f;
+    [Tooltip("How many simulated minutes pass per real minute.")]
+    [SerializeField, Range(1f, 60f)] private float simulationTimeScale = 4f;
+    [Tooltip("Maximum simulated time applied after the application was offline.")]
+    [SerializeField, Range(0f, 24f)] private float maximumOfflineCatchUpHours = 8f;
 
     [Header("Agent Personalities")]
     [SerializeField] private AgentPersonalityEntry[] personalities;
 
     private ILLMBackend backend;
+    private readonly Dictionary<string, ILLMBackend> backendsByAgent =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, AgentProfile> profiles = new();
     private readonly List<string> worldEvents = new();
     private readonly List<string> recentGlobalTopics = new();
     private readonly List<string> recentGlobalUtterances = new();
     private readonly HashSet<string> announcedBirthdays = new();
-    private readonly List<string> pendingActivityRequesters = new();
+    private readonly Dictionary<ILLMBackend, List<string>> pendingActivityRequesters = new();
+    private readonly Dictionary<ILLMBackend, float> nextActivityPlanTimeByBackend = new();
     private bool loggedMissingApiKey;
-    private float nextGlobalActivityPlanTime;
+    private float nextStateSaveTime;
+    private WorldStateSnapshot persistedState;
+    private readonly HashSet<string> restoredAgentIds =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, AIWorkerAgent> runtimeAgents =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, PersistedAgentRuntimeState> runtimeStates =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, AgentRelationshipState> relationships =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<PersistedStoryArcState> storyArcs = new();
+    private double worldUnixSeconds;
+    private float nextRoutineConversationTime;
 
     private LLMConversationPlanner conversationPlanner;
     private LLMActivityPlanner activityPlanner;
@@ -166,6 +236,13 @@ public class LLMBrainService : MonoBehaviour
         }
 
         Instance = this;
+        DontDestroyOnLoad(gameObject);
+        Application.runInBackground = true;
+        persistedState = WorldStateStore.Load();
+        RestoreSimulationState();
+        RestoreWorldEvents();
+        nextStateSaveTime = Time.unscaledTime + Mathf.Max(15f, stateSaveIntervalSeconds);
+
         string resolvedApiKey = ResolveApiKey();
         bool backendReady = !RequiresApiKey() || !string.IsNullOrWhiteSpace(resolvedApiKey);
         if (backendReady)
@@ -178,13 +255,15 @@ public class LLMBrainService : MonoBehaviour
             backend = null;
         }
 
-        conversationPlanner = new LLMConversationPlanner(this, backend);
-        activityPlanner = new LLMActivityPlanner(this, backend);
+        ConfigureAgentBrains();
+        conversationPlanner = new LLMConversationPlanner(this);
+        activityPlanner = new LLMActivityPlanner(this);
 
         Debug.Log("[LLMBrainService] backend=" + (backendReady ? model : "NONE (missing API key)")
+            + " | assignedBrains=" + backendsByAgent.Count
             + " | enableSocialReplies=" + enableSocialReplies
-            + " | enableGeneratedConversationPlans=" + enableGeneratedConversationPlans
-            + " | enableActivityPlans=" + enableActivityPlans, this);
+            + " | enableActivityPlans=" + enableActivityPlans
+            + " | localRequestLimits=disabled", this);
 
         if (personalities != null)
         {
@@ -208,6 +287,8 @@ public class LLMBrainService : MonoBehaviour
         if (profile == null)
             return;
 
+        RestoreProfile(profile);
+
         if (!string.IsNullOrEmpty(profile.agentId))
             profiles[profile.agentId] = profile;
 
@@ -217,6 +298,36 @@ public class LLMBrainService : MonoBehaviour
         RememberBirthdayIfToday(profile);
     }
 
+    private void Update()
+    {
+        worldUnixSeconds += Time.unscaledDeltaTime * Mathf.Max(1f, simulationTimeScale);
+        if (Time.unscaledTime < nextStateSaveTime)
+            return;
+
+        SaveState();
+        nextStateSaveTime = Time.unscaledTime + Mathf.Max(15f, stateSaveIntervalSeconds);
+    }
+
+    private void OnApplicationPause(bool paused)
+    {
+        if (paused)
+            SaveState();
+    }
+
+    private void OnApplicationQuit()
+    {
+        SaveState();
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance != this)
+            return;
+
+        SaveState();
+        Instance = null;
+    }
+
     public AgentProfile GetProfile(string agentId)
     {
         profiles.TryGetValue(agentId, out AgentProfile profile);
@@ -224,27 +335,194 @@ public class LLMBrainService : MonoBehaviour
     }
 
     public bool EnableSocialReplies => enableSocialReplies;
-    public bool EnableGeneratedConversationPlans => enableGeneratedConversationPlans;
     public bool EnableActivityPlans => enableActivityPlans;
     public int ActivityBatchSize => Mathf.Clamp(activityBatchSize, 2, 6);
+    public double WorldUnixSeconds => worldUnixSeconds;
+    public DateTime WorldDateTime =>
+        DateTimeOffset.FromUnixTimeSeconds((long)Math.Max(0d, worldUnixSeconds))
+            .ToLocalTime().DateTime;
+    public WorldSchedulePhase SchedulePhase => ResolveSchedulePhase(WorldDateTime.Hour);
+    public string ScheduleContext => WorldDateTime.ToString("dddd HH:mm",
+        CultureInfo.InvariantCulture) + ", " + SchedulePhase.ToString().ToLowerInvariant();
+    public double WorldSecondsFromRealSeconds(float realSeconds)
+    {
+        return Math.Max(0f, realSeconds) * Mathf.Max(1f, simulationTimeScale);
+    }
+
+    public float RealSecondsUntil(double targetWorldTime)
+    {
+        return Mathf.Max(0f, (float)((targetWorldTime - worldUnixSeconds)
+            / Mathf.Max(1f, simulationTimeScale)));
+    }
+
+    public ILLMBackend GetBackendForAgent(string agentId)
+    {
+        if (!string.IsNullOrWhiteSpace(agentId)
+            && backendsByAgent.TryGetValue(agentId.Trim(), out ILLMBackend assigned))
+            return assigned;
+        return backend;
+    }
+
+    private bool HasAnyBackend => backend != null || backendsByAgent.Count > 0;
+
+    public bool TryReserveRoutineConversation()
+    {
+        if (!enableSocialReplies || !HasAnyBackend
+            || Time.unscaledTime < nextRoutineConversationTime)
+            return false;
+
+        nextRoutineConversationTime = Time.unscaledTime
+            + Mathf.Max(15f, routineConversationIntervalSeconds);
+        return true;
+    }
+
+    public bool CanStartRoutineConversation
+    {
+        get
+        {
+            if (!enableSocialReplies || !HasAnyBackend
+                || Time.unscaledTime < nextRoutineConversationTime)
+                return false;
+            return true;
+        }
+    }
+
+    public void RegisterRuntimeAgent(AIWorkerAgent agent)
+    {
+        if (agent == null || string.IsNullOrWhiteSpace(agent.AgentId))
+            return;
+
+        runtimeAgents[agent.AgentId] = agent;
+        if (runtimeStates.TryGetValue(agent.AgentId, out PersistedAgentRuntimeState saved))
+            agent.RestoreRuntimeState(saved, CalculateOfflineWorldSeconds(saved));
+    }
+
+    public void UnregisterRuntimeAgent(AIWorkerAgent agent)
+    {
+        if (agent == null || string.IsNullOrWhiteSpace(agent.AgentId))
+            return;
+        runtimeStates[agent.AgentId] = agent.CaptureRuntimeState();
+        runtimeAgents.Remove(agent.AgentId);
+    }
+
+    public float GetRelationshipScore(string firstAgentId, string secondAgentId)
+    {
+        AgentRelationshipState relationship = GetRelationship(firstAgentId, secondAgentId, false);
+        return relationship == null
+            ? 0f
+            : relationship.affinity + relationship.trust - relationship.tension;
+    }
+
+    public string BuildRelationshipContext(string firstAgentId, string secondAgentId)
+    {
+        AgentRelationshipState relationship = GetRelationship(firstAgentId, secondAgentId, false);
+        if (relationship == null || relationship.interactions == 0)
+            return "They do not know each other well yet.";
+
+        string familiarity = relationship.interactions >= 8 ? "very familiar"
+            : relationship.interactions >= 3 ? "familiar" : "recent acquaintances";
+        string tone = relationship.tension > relationship.trust + 2f ? "with unresolved tension"
+            : relationship.trust >= 5f ? "and they trust each other"
+            : relationship.affinity >= 4f ? "and generally enjoy each other's company"
+            : "and are still learning how to work together";
+        return familiarity + " " + tone + ". Last shared event: "
+            + (string.IsNullOrWhiteSpace(relationship.lastEvent)
+                ? "ordinary office conversation" : relationship.lastEvent);
+    }
+
+    public void RecordRelationshipInteraction(string firstAgentId, string secondAgentId,
+        string eventType, string subject)
+    {
+        AgentRelationshipState relationship = GetRelationship(firstAgentId, secondAgentId, true);
+        if (relationship == null)
+            return;
+
+        relationship.interactions++;
+        relationship.affinity = Mathf.Clamp(relationship.affinity + 0.35f, -10f, 10f);
+        switch ((eventType ?? "").Trim().ToLowerInvariant())
+        {
+            case "secret":
+                relationship.trust += 0.8f;
+                break;
+            case "gossip":
+                relationship.affinity += 0.4f;
+                relationship.tension += 0.25f;
+                break;
+            case "promise":
+            case "plan":
+            case "invitation":
+                relationship.trust += 0.35f;
+                break;
+            case "favor_done":
+                relationship.trust += 1.5f;
+                relationship.affinity += 0.75f;
+                relationship.tension -= 0.5f;
+                break;
+            case "conflict":
+                relationship.tension += 1.5f;
+                relationship.affinity -= 0.5f;
+                break;
+        }
+
+        relationship.affinity = Mathf.Clamp(relationship.affinity, -10f, 10f);
+        relationship.trust = Mathf.Clamp(relationship.trust, 0f, 10f);
+        relationship.tension = Mathf.Clamp(relationship.tension, 0f, 10f);
+        relationship.lastEvent = string.IsNullOrWhiteSpace(subject)
+            ? eventType : subject.Trim();
+        relationship.lastInteractionWorldTime = worldUnixSeconds;
+    }
+
+    public IReadOnlyList<PersistedStoryArcState> StoryArcs => storyArcs;
+
+    public void UpsertStoryArc(PersistedStoryArcState arc)
+    {
+        if (arc == null || string.IsNullOrWhiteSpace(arc.arcId))
+            return;
+        int index = storyArcs.FindIndex(candidate => candidate != null
+            && string.Equals(candidate.arcId, arc.arcId, StringComparison.OrdinalIgnoreCase));
+        if (index >= 0)
+            storyArcs[index] = arc;
+        else
+            storyArcs.Add(arc);
+        while (storyArcs.Count > 12)
+            storyArcs.RemoveAt(0);
+    }
+
+    public void CompleteStoryArc(string arcId)
+    {
+        PersistedStoryArcState arc = storyArcs.Find(candidate => candidate != null
+            && string.Equals(candidate.arcId, arcId, StringComparison.OrdinalIgnoreCase));
+        if (arc != null)
+            arc.status = "completed";
+    }
 
     public bool TryReserveActivityPlanRequest(string agentId)
     {
-        if (!enableActivityPlans || backend == null || string.IsNullOrWhiteSpace(agentId))
+        ILLMBackend assignedBackend = GetBackendForAgent(agentId);
+        if (!enableActivityPlans || assignedBackend == null
+            || string.IsNullOrWhiteSpace(agentId))
             return false;
 
         string requester = agentId.Trim();
-        if (!pendingActivityRequesters.Contains(requester))
-            pendingActivityRequesters.Add(requester);
+        if (!pendingActivityRequesters.TryGetValue(assignedBackend,
+                out List<string> queue))
+        {
+            queue = new List<string>();
+            pendingActivityRequesters[assignedBackend] = queue;
+        }
+        if (!queue.Contains(requester))
+            queue.Add(requester);
 
-        if (pendingActivityRequesters.Count == 0
-            || !string.Equals(pendingActivityRequesters[0], requester,
+        nextActivityPlanTimeByBackend.TryGetValue(assignedBackend,
+            out float nextRequestTime);
+        if (queue.Count == 0
+            || !string.Equals(queue[0], requester,
                 StringComparison.OrdinalIgnoreCase)
-            || Time.unscaledTime < nextGlobalActivityPlanTime)
+            || Time.unscaledTime < nextRequestTime)
             return false;
 
-        pendingActivityRequesters.RemoveAt(0);
-        nextGlobalActivityPlanTime = Time.unscaledTime
+        queue.RemoveAt(0);
+        nextActivityPlanTimeByBackend[assignedBackend] = Time.unscaledTime
             + Mathf.Max(2f, globalActivityPlanIntervalSeconds);
         return true;
     }
@@ -254,8 +532,9 @@ public class LLMBrainService : MonoBehaviour
         if (string.IsNullOrWhiteSpace(agentId))
             return;
 
-        pendingActivityRequesters.RemoveAll(value => string.Equals(
-            value, agentId.Trim(), StringComparison.OrdinalIgnoreCase));
+        foreach (List<string> queue in pendingActivityRequesters.Values)
+            queue.RemoveAll(value => string.Equals(
+                value, agentId.Trim(), StringComparison.OrdinalIgnoreCase));
     }
 
     public void Remember(string agentId, string line)
@@ -274,19 +553,6 @@ public class LLMBrainService : MonoBehaviour
             worldEvents.RemoveAt(0);
     }
 
-    public async Task<ConversationPlan> PlanConversationAsync(
-        string agentId,
-        OfficeActionType location,
-        List<ConversationParticipantContext> coworkers,
-        string relationships,
-        string currentState)
-    {
-        return await conversationPlanner.PlanConversationAsync(
-            agentId, location, coworkers, relationships, currentState,
-            Mathf.Max(2, memoryLines), temperature, requestTimeoutSeconds,
-            conversationPlanTimeoutSeconds);
-    }
-
     public async Task<List<OfficeActivityPlan>> PlanActivityBatchAsync(
         string agentId,
         List<OfficeActionType> availableActions,
@@ -296,28 +562,36 @@ public class LLMBrainService : MonoBehaviour
     {
         return await activityPlanner.PlanActivityBatchAsync(
             agentId, availableActions, coworkers, currentState, requestedCount,
-            Mathf.Max(2, memoryLines), temperature, requestTimeoutSeconds,
+            Mathf.Clamp(memoryLines, 1, 2), temperature, requestTimeoutSeconds,
             activityPlanTimeoutSeconds);
     }
 
     public async Task<ConversationScript> GenerateConversationAsync(
         List<ConversationParticipantContext> participants,
         string openingSpeaker,
-        string openingLine,
         string topic,
         List<string> speakerOrder)
     {
         return await conversationPlanner.GenerateConversationAsync(
-            participants, openingSpeaker, openingLine, topic, speakerOrder,
-            Mathf.Max(2, memoryLines), temperature, requestTimeoutSeconds,
+            participants, openingSpeaker, topic, speakerOrder,
+            temperature, requestTimeoutSeconds,
             conversationScriptTimeoutSeconds);
+    }
+
+    public async Task<PreparedStoryConversation> GenerateStoryConversationAsync(
+        ConversationParticipantContext speaker, ConversationParticipantContext target,
+        string storyTitle, string establishedFact, int stage, string priorOutcome)
+    {
+        return await conversationPlanner.GenerateStoryConversationAsync(
+            speaker, target, storyTitle, establishedFact, stage, priorOutcome,
+            temperature, requestTimeoutSeconds, conversationScriptTimeoutSeconds);
     }
 
     public async Task<List<string>> GenerateEventMonologueAsync(
         string agentId, string purpose, string context, int lineCount)
     {
         return await conversationPlanner.GenerateEventMonologueAsync(
-            agentId, purpose, context, lineCount, Mathf.Max(2, memoryLines),
+            agentId, purpose, context, lineCount, Mathf.Clamp(memoryLines, 1, 2),
             temperature, requestTimeoutSeconds, conversationScriptTimeoutSeconds);
     }
 
@@ -390,8 +664,7 @@ public class LLMBrainService : MonoBehaviour
 
     private void AppendMemory(AgentProfile profile, string line)
     {
-        int recentStart = Mathf.Max(0, profile.memory.Count - 8);
-        for (int i = recentStart; i < profile.memory.Count; i++)
+        for (int i = 0; i < profile.memory.Count; i++)
         {
             if (string.Equals(profile.memory[i], line, StringComparison.OrdinalIgnoreCase))
                 return;
@@ -406,8 +679,8 @@ public class LLMBrainService : MonoBehaviour
 
     private string ResolveApiKey()
     {
-        if (!string.IsNullOrWhiteSpace(apiKey))
-            return apiKey.Trim();
+        if (!RequiresApiKey())
+            return "";
 
         string[] candidates =
         {
@@ -436,13 +709,241 @@ public class LLMBrainService : MonoBehaviour
         return "";
     }
 
+    private void ConfigureAgentBrains()
+    {
+        backendsByAgent.Clear();
+        if (agentBrains == null)
+            return;
+
+        foreach (AgentBrainEndpoint slot in agentBrains)
+        {
+            if (slot == null || slot.agentIds == null
+                || string.IsNullOrWhiteSpace(slot.baseUrl)
+                || string.IsNullOrWhiteSpace(slot.model))
+                continue;
+
+            string key = ResolveEnvironmentVariable(slot.apiKeyEnvironmentVariable);
+            if (RequiresApiKey(slot.baseUrl) && string.IsNullOrWhiteSpace(key))
+            {
+                Debug.LogWarning("[LLMBrainService] brain " +
+                    (string.IsNullOrWhiteSpace(slot.label) ? slot.model : slot.label) +
+                    " disabled because its API key environment variable is empty.", this);
+                continue;
+            }
+
+            ILLMBackend slotBackend = new OpenAICompatibleBackend(
+                slot.baseUrl, key, slot.model);
+            foreach (string rawAgentId in slot.agentIds)
+            {
+                if (string.IsNullOrWhiteSpace(rawAgentId))
+                    continue;
+                string agentId = rawAgentId.Trim();
+                backendsByAgent[agentId] = slotBackend;
+                Debug.Log("[LLMBrainService] " + agentId + " brain=" +
+                    (string.IsNullOrWhiteSpace(slot.label)
+                        ? slot.model : slot.label + " (" + slot.model + ")"), this);
+            }
+        }
+    }
+
+    private static string ResolveEnvironmentVariable(string variableName)
+    {
+        if (string.IsNullOrWhiteSpace(variableName))
+            return "";
+        string name = variableName.Trim();
+        string value = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(value))
+            value = Environment.GetEnvironmentVariable(
+                name, EnvironmentVariableTarget.User);
+        if (string.IsNullOrWhiteSpace(value))
+            value = Environment.GetEnvironmentVariable(
+                name, EnvironmentVariableTarget.Machine);
+        return value?.Trim() ?? "";
+    }
+
+    private void RestoreWorldEvents()
+    {
+        if (persistedState?.worldEvents == null)
+            return;
+
+        foreach (string worldEvent in persistedState.worldEvents)
+            RememberWorldEvent(worldEvent);
+    }
+
+    private void RestoreSimulationState()
+    {
+        double realNow = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        worldUnixSeconds = persistedState != null && persistedState.worldUnixSeconds > 0d
+            ? persistedState.worldUnixSeconds : realNow;
+
+        if (persistedState != null && DateTime.TryParse(persistedState.savedAtUtc,
+                CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind,
+                out DateTime savedAtUtc))
+        {
+            double realOfflineSeconds = Math.Max(0d,
+                (DateTime.UtcNow - savedAtUtc.ToUniversalTime()).TotalSeconds);
+            double simulatedOfflineSeconds = realOfflineSeconds
+                * Mathf.Max(1f, simulationTimeScale);
+            worldUnixSeconds += Math.Min(simulatedOfflineSeconds,
+                Mathf.Max(0f, maximumOfflineCatchUpHours) * 3600d);
+        }
+
+        if (persistedState?.agentRuntime != null)
+            foreach (PersistedAgentRuntimeState state in persistedState.agentRuntime)
+                if (state != null && !string.IsNullOrWhiteSpace(state.agentId))
+                    runtimeStates[state.agentId] = state;
+
+        if (persistedState?.relationships != null)
+            foreach (AgentRelationshipState relationship in persistedState.relationships)
+                if (relationship != null)
+                    relationships[RelationshipKey(
+                        relationship.firstAgentId, relationship.secondAgentId)] = relationship;
+
+        if (persistedState?.storyArcs != null)
+            foreach (PersistedStoryArcState arc in persistedState.storyArcs)
+                if (arc != null && !string.IsNullOrWhiteSpace(arc.arcId))
+                    storyArcs.Add(arc);
+    }
+
+    private void RestoreProfile(AgentProfile profile)
+    {
+        if (profile == null || string.IsNullOrWhiteSpace(profile.agentId)
+            || !restoredAgentIds.Add(profile.agentId)
+            || persistedState?.agents == null)
+            return;
+
+        PersistedAgentState saved = persistedState.agents.Find(candidate =>
+            candidate != null && string.Equals(candidate.agentId, profile.agentId,
+                StringComparison.OrdinalIgnoreCase));
+        if (saved == null)
+            return;
+
+        Replace(profile.memory, saved.memory, 30);
+        ReplaceSocialMemory(profile.socialMemory, saved.socialMemory, 30);
+        Replace(profile.recentTopics, saved.recentTopics, 8);
+        Replace(profile.recentOpenings, saved.recentOpenings, 8);
+        Replace(profile.recentUtterances, saved.recentUtterances, 10);
+        profile.recentUtterances.RemoveAll(IsLegacyFallbackUtterance);
+    }
+
+    private static void Replace(List<string> target, List<string> source, int capacity)
+    {
+        target.Clear();
+        if (source == null)
+            return;
+
+        int start = Mathf.Max(0, source.Count - Mathf.Max(1, capacity));
+        for (int i = start; i < source.Count; i++)
+        {
+            string value = source[i]?.Trim();
+            if (!string.IsNullOrWhiteSpace(value)
+                && !target.Exists(existing => string.Equals(existing, value,
+                    StringComparison.OrdinalIgnoreCase)))
+                target.Add(value);
+        }
+    }
+
+    private static bool IsLegacyFallbackUtterance(string line)
+    {
+        return !string.IsNullOrWhiteSpace(line)
+            && LegacyFallbackUtterances.Contains(line.Trim());
+    }
+
+    private static void ReplaceSocialMemory(List<SocialMemoryEntry> target,
+        List<SocialMemoryEntry> source, int capacity)
+    {
+        target.Clear();
+        if (source == null)
+            return;
+
+        int start = Mathf.Max(0, source.Count - Mathf.Max(1, capacity));
+        for (int i = start; i < source.Count; i++)
+            if (source[i] != null)
+                target.Add(source[i]);
+    }
+
+    private void SaveState()
+    {
+        foreach (KeyValuePair<string, AIWorkerAgent> entry in runtimeAgents)
+            if (entry.Value != null)
+                runtimeStates[entry.Key] = entry.Value.CaptureRuntimeState();
+
+        HashSet<AgentProfile> uniqueProfiles = new(profiles.Values);
+        WorldStateStore.Save(uniqueProfiles, worldEvents, worldUnixSeconds,
+            runtimeStates.Values, relationships.Values, storyArcs);
+    }
+
+    private double CalculateOfflineWorldSeconds(PersistedAgentRuntimeState state)
+    {
+        if (state == null || state.capturedAtUnixMilliseconds <= 0)
+            return 0d;
+        double realSeconds = Math.Max(0d,
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            - state.capturedAtUnixMilliseconds) / 1000d;
+        return Math.Min(realSeconds * Mathf.Max(1f, simulationTimeScale),
+            Mathf.Max(0f, maximumOfflineCatchUpHours) * 3600d);
+    }
+
+    private AgentRelationshipState GetRelationship(string firstAgentId,
+        string secondAgentId, bool create)
+    {
+        if (string.IsNullOrWhiteSpace(firstAgentId)
+            || string.IsNullOrWhiteSpace(secondAgentId)
+            || string.Equals(firstAgentId, secondAgentId, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        string key = RelationshipKey(firstAgentId, secondAgentId);
+        if (relationships.TryGetValue(key, out AgentRelationshipState relationship)
+            || !create)
+            return relationship;
+
+        bool firstBeforeSecond = string.Compare(firstAgentId, secondAgentId,
+            StringComparison.OrdinalIgnoreCase) <= 0;
+        relationship = new AgentRelationshipState
+        {
+            firstAgentId = firstBeforeSecond ? firstAgentId : secondAgentId,
+            secondAgentId = firstBeforeSecond ? secondAgentId : firstAgentId
+        };
+        relationships[key] = relationship;
+        return relationship;
+    }
+
+    private static string RelationshipKey(string firstAgentId, string secondAgentId)
+    {
+        string first = (firstAgentId ?? "").Trim();
+        string second = (secondAgentId ?? "").Trim();
+        return string.Compare(first, second, StringComparison.OrdinalIgnoreCase) <= 0
+            ? first.ToLowerInvariant() + "|" + second.ToLowerInvariant()
+            : second.ToLowerInvariant() + "|" + first.ToLowerInvariant();
+    }
+
+    private static WorldSchedulePhase ResolveSchedulePhase(int hour)
+    {
+        if (hour < 7 || hour >= 22)
+            return WorldSchedulePhase.Night;
+        if (hour < 9)
+            return WorldSchedulePhase.Morning;
+        if (hour < 12)
+            return WorldSchedulePhase.Work;
+        if (hour < 14)
+            return WorldSchedulePhase.Lunch;
+        if (hour < 18)
+            return WorldSchedulePhase.Afternoon;
+        return WorldSchedulePhase.Evening;
+    }
+
     private bool RequiresApiKey()
     {
-        if (string.IsNullOrWhiteSpace(baseUrl))
+        return RequiresApiKey(baseUrl);
+    }
+
+    private static bool RequiresApiKey(string endpoint)
+    {
+        if (string.IsNullOrWhiteSpace(endpoint))
             return false;
 
         Uri uri;
-        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out uri))
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out uri))
             return false;
 
         return !string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)
@@ -456,7 +957,7 @@ public class LLMBrainService : MonoBehaviour
 
         loggedMissingApiKey = true;
         Debug.LogWarning(nameof(LLMBrainService) +
-            " GLM API key is empty. Set Api Key in the Inspector or launch Unity with GLM_API_KEY, ZHIPUAI_API_KEY, or ZAI_API_KEY set.",
+            " API key is empty. Configure Api Key Environment Variable and launch Unity from a process that can read it.",
             this);
     }
 
@@ -467,13 +968,14 @@ public class LLMBrainService : MonoBehaviour
         if (RequiresApiKey() && string.IsNullOrWhiteSpace(resolvedApiKey))
         {
             LogMissingApiKey();
-            Debug.Log(nameof(LLMBrainService) + " test response: (not sent - missing GLM API key)", this);
+            Debug.Log(nameof(LLMBrainService) +
+                " test response: (not sent - missing API key)", this);
             return;
         }
 
         backend = new OpenAICompatibleBackend(baseUrl, resolvedApiKey, model);
-        conversationPlanner = new LLMConversationPlanner(this, backend);
-        activityPlanner = new LLMActivityPlanner(this, backend);
+        conversationPlanner = new LLMConversationPlanner(this);
+        activityPlanner = new LLMActivityPlanner(this);
 
         List<ChatMessage> messages = new()
         {
@@ -491,6 +993,6 @@ public class LLMBrainService : MonoBehaviour
         string result = await backend.CompleteAsync(messages, opts);
 
         Debug.Log(nameof(LLMBrainService) + " test response: " +
-            (result ?? "(null/failed - check GLM API key, quota, base URL, and model access)"));
+            (result ?? "(null/failed - check the local service or remote key, quota, URL, and model)"));
     }
 }

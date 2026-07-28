@@ -15,6 +15,7 @@ MonoBehaviour:
   eventId: lounge
   displayName: Lounge Upgrade
   description: The break area gets a more comfortable upgrade.
+  characterReaction: Our break corner just became dangerously comfortable.
   icon: {fileID: 0}
   scope: 0
   nearbyRadius: 2

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -17,7 +18,11 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
     [SerializeField] private bool issueMilestoneCouponOnlyOnce = true;
 
     private readonly HashSet<string> issuedMilestones = new();
+    private readonly HashSet<string> processedPhysicalEventIds =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Queue<string> processedPhysicalEventOrder = new();
     private VendingEventDispatcher dispatcher;
+    public event Action<PhysicalInteractionEvent, VendingEventSO> PhysicalEventAccepted;
     public static PhysicalVirtualInteractionBridge Ensure()
     {
         if (Instance != null)
@@ -69,8 +74,11 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
     {
         PhysicalInteractionEvent physicalEvent = new()
         {
+            eventId = Guid.NewGuid().ToString("N"),
             productId = productId,
-            userId = string.IsNullOrEmpty(userId) ? defaultUserId : userId
+            userId = string.IsNullOrEmpty(userId) ? defaultUserId : userId,
+            occurredAtUnixMilliseconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            source = "local"
         };
 
         HandlePhysicalEvent(physicalEvent);
@@ -92,8 +100,23 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
             return;
         }
 
-        LogHistory("physical_sale: " + physicalEvent.productId + " -> virtual_event: " + evt.eventId + " user: " + physicalEvent.userId);
+        if (string.IsNullOrWhiteSpace(physicalEvent.eventId))
+            physicalEvent.eventId = Guid.NewGuid().ToString("N");
+        if (!processedPhysicalEventIds.Add(physicalEvent.eventId))
+        {
+            LogHistory("physical_sale ignored: duplicate event '" +
+                physicalEvent.eventId + "'");
+            return;
+        }
+        processedPhysicalEventOrder.Enqueue(physicalEvent.eventId);
+        while (processedPhysicalEventOrder.Count > 256)
+            processedPhysicalEventIds.Remove(processedPhysicalEventOrder.Dequeue());
+
+        LogHistory("physical_sale: " + physicalEvent.productId + " -> virtual_event: "
+            + evt.eventId + " user: " + physicalEvent.userId + " event: "
+            + physicalEvent.eventId);
         dispatcher.TriggerEvent(evt);
+        PhysicalEventAccepted?.Invoke(physicalEvent, evt);
 
         if (evt.interactionDirection == InteractionDirection.Bidirectional)
             IssueCouponFromEvent(physicalEvent.userId, evt);

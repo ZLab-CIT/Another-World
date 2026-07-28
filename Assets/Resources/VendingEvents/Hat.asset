@@ -8,6 +8,7 @@ MonoBehaviour:
   eventId: hat
   displayName: Random Hat
   description: One agent gets a stylish new hat!
+  characterReaction: This hat has completely changed the office hierarchy.
   rarity: 1
   announceDuration: 1.4
   interactionDirection: 2

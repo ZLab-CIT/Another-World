@@ -8,6 +8,7 @@ MonoBehaviour:
   eventId: healthy_lunch
   displayName: Healthy Lunch
   description: Office-wide wellness - needs decay slower.
+  characterReaction: Someone out there just improved lunch for everyone.
   scope: 2
   energyDecayMultiplier: 0.7
   focusDecayMultiplier: 0.7

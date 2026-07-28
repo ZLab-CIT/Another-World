@@ -40,14 +40,10 @@ MonoBehaviour:
     do not say.
   - She collects expressions that cannot be translated neatly between languages.
   - A novel once made her miss her train stop because she refused to close it mid-chapter.
-  conversationStarters:
-  - '{name}, I found a phrase in another language that perfectly describes this office.'
-  - '{name}, what is the most memorable thing you have read lately?'
-  - '{name}, I need an honest opinion about a very human HR mystery.'
-  - '{name}, I missed my stop once because of a book. Has anything absorbed you that
-    badly?'
-  - '{name}, which word from another language do you wish English had?'
-  - '{name}, someone described this office as calm today. I suspect they visited
-    the wrong floor.'
-  - '{name}, what is a small habit that instantly tells you how someone is feeling?'
-  - '{name}, my brothers disagree about everything except how to annoy me efficiently.'
+  actionPreferences:
+  - actionType: 4
+    scoreModifier: 7
+  - actionType: 3
+    scoreModifier: 4
+  - actionType: 5
+    scoreModifier: 3
