@@ -12,10 +12,56 @@ public sealed class ConversationParticipantContext
     public string currentState;
 }
 
+[Serializable]
 public sealed class ConversationTurn
 {
     public string speaker;
     public string line;
+}
+
+[Serializable]
+public sealed class OfficeEpisodeAction
+{
+    public string agentId;
+    public string actionType;
+    public string timing;
+    public string targetAgentId;
+    public string destinationHint;
+    public float durationSeconds;
+    public string thought;
+    public string reason;
+}
+
+[Serializable]
+public sealed class OfficeEpisodeDialogueLine
+{
+    public string agentId;
+    public string line;
+}
+
+[Serializable]
+public sealed class OfficeEpisodeBeat
+{
+    public int schemaVersion;
+    public string beatId;
+    public string kind;
+    public string topic;
+    public float delaySeconds;
+    public string[] participantIds;
+    public string thoughtAgentId;
+    public string privateThought;
+    public OfficeEpisodeAction[] actions;
+    public OfficeEpisodeDialogueLine[] dialogue;
+    public string memory;
+    public SocialMemoryEntry socialEvent;
+    public string resolvesSubject;
+}
+
+[Serializable]
+public sealed class OfficeEpisodePack
+{
+    public string packId;
+    public OfficeEpisodeBeat[] beats;
 }
 
 [Serializable]
@@ -65,6 +111,8 @@ public sealed class OfficeActivityPlan
     public bool completesSocialCommitment;
     public string companionPreparation;
     public bool giveHeldItemToTarget;
+    public bool isDirected;
+    public int remainingStartAttempts;
 }
 
 public enum OfficeDestinationMode
@@ -121,6 +169,14 @@ public sealed class AgentBrainEndpoint
 
 public class LLMBrainService : MonoBehaviour
 {
+    private sealed class EpisodeBackendState
+    {
+        public string label;
+        public ILLMBackend backend;
+        public int consecutiveFailures;
+        public float circuitOpenUntil;
+    }
+
     public static LLMBrainService Instance { get; private set; }
     private static readonly HashSet<string> LegacyFallbackUtterances =
         new(StringComparer.OrdinalIgnoreCase)
@@ -143,19 +199,19 @@ public class LLMBrainService : MonoBehaviour
             "I am glad we had a chance to talk about it."
         };
 
-    [Header("Backend (OpenAI-compatible; local Ollama by default)")]
-    [SerializeField] private string baseUrl = "http://localhost:11434/v1";
-    [Tooltip("Environment variable containing the API key. Leave empty for local Ollama.")]
-    [SerializeField] private string apiKeyEnvironmentVariable = "";
-    [Tooltip("Model identifier installed in Ollama or provided by a remote endpoint.")]
-    [SerializeField] private string model = "qwen2.5:1.5b";
-    [Tooltip("Optional independent providers/models. Each agent is routed to its assigned brain.")]
+    [Header("Backend (OpenAI-compatible remote provider)")]
+    [SerializeField] private string baseUrl = "https://api.groq.com/openai/v1";
+    [Tooltip("Environment variable containing the provider API key.")]
+    [SerializeField] private string apiKeyEnvironmentVariable = "GROQ_API_KEY";
+    [Tooltip("Remote model used by the default provider.")]
+    [SerializeField] private string model = "openai/gpt-oss-20b";
+    [Tooltip("Optional provider pool. Agent assignments remain supported for legacy calls; every remote entry is also available to the episode director.")]
     [SerializeField] private AgentBrainEndpoint[] agentBrains;
 
     [Header("Generation")]
     [SerializeField] private float temperature = 0.7f;
     [Tooltip("Seconds before an LLM request is abandoned (falls back to utility AI). Set high enough to survive the first cold model load (~15-30s) plus generation.")]
-    [SerializeField] private int requestTimeoutSeconds = 30;
+    [SerializeField] private int requestTimeoutSeconds = 60;
     [Tooltip("Number of recent memory lines included in each prompt.")]
     [SerializeField] private int memoryLines = 2;
 
@@ -163,17 +219,17 @@ public class LLMBrainService : MonoBehaviour
     [Tooltip("If on, the model writes the continuation of each conversation. Turn off for fully local dialogue.")]
     [SerializeField] private bool enableSocialReplies = true;
     [Tooltip("Maximum generation time for the complete three-reply conversation script.")]
-    [SerializeField, Min(8)] private int conversationScriptTimeoutSeconds = 30;
+    [SerializeField, Min(8)] private int conversationScriptTimeoutSeconds = 45;
     [Tooltip("Minimum pause between ordinary model-written chats across the whole office. Featured story and vending scenes are separate.")]
     [SerializeField, Min(15f)] private float routineConversationIntervalSeconds = 20f;
 
     [Header("Activity Planning")]
     [Tooltip("If on, the model generates short queues of office activities. Unity still validates every target and path when each activity starts.")]
-    [SerializeField] private bool enableActivityPlans = true;
+    [SerializeField] private bool enableActivityPlans = false;
     [SerializeField, Range(2, 6)] private int activityBatchSize = 3;
     [Tooltip("Minimum time between activity-batch requests across every worker in the office. A longer pause reduces token bursts on CPU-hosted models.")]
     [SerializeField, Min(2f)] private float globalActivityPlanIntervalSeconds = 20f;
-    [SerializeField, Min(10)] private int activityPlanTimeoutSeconds = 30;
+    [SerializeField, Min(10)] private int activityPlanTimeoutSeconds = 60;
 
     [Header("Persistence")]
     [SerializeField, Min(15f)] private float stateSaveIntervalSeconds = 60f;
@@ -188,6 +244,7 @@ public class LLMBrainService : MonoBehaviour
     private ILLMBackend backend;
     private readonly Dictionary<string, ILLMBackend> backendsByAgent =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<EpisodeBackendState> episodeBackends = new();
     private readonly Dictionary<string, AgentProfile> profiles = new();
     private readonly List<string> worldEvents = new();
     private readonly List<string> recentGlobalTopics = new();
@@ -209,9 +266,12 @@ public class LLMBrainService : MonoBehaviour
     private readonly List<PersistedStoryArcState> storyArcs = new();
     private double worldUnixSeconds;
     private float nextRoutineConversationTime;
+    private int nextEpisodeBackendIndex;
+    private List<OfficeEpisodeBeat> persistedEpisodeReserve = new();
 
     private LLMConversationPlanner conversationPlanner;
     private LLMActivityPlanner activityPlanner;
+    private OfficeEpisodePlanner episodePlanner;
 
     internal Dictionary<string, AgentProfile> Profiles => profiles;
     internal List<string> WorldEvents => worldEvents;
@@ -258,12 +318,14 @@ public class LLMBrainService : MonoBehaviour
         ConfigureAgentBrains();
         conversationPlanner = new LLMConversationPlanner(this);
         activityPlanner = new LLMActivityPlanner(this);
+        episodePlanner = new OfficeEpisodePlanner(this);
 
         Debug.Log("[LLMBrainService] backend=" + (backendReady ? model : "NONE (missing API key)")
             + " | assignedBrains=" + backendsByAgent.Count
+            + " | remoteEpisodeProviders=" + episodeBackends.Count
             + " | enableSocialReplies=" + enableSocialReplies
             + " | enableActivityPlans=" + enableActivityPlans
-            + " | localRequestLimits=disabled", this);
+            + " | localInference=disabledForEpisodes", this);
 
         if (personalities != null)
         {
@@ -336,6 +398,7 @@ public class LLMBrainService : MonoBehaviour
 
     public bool EnableSocialReplies => enableSocialReplies;
     public bool EnableActivityPlans => enableActivityPlans;
+    public bool HasRemoteEpisodeProvider => episodeBackends.Count > 0;
     public int ActivityBatchSize => Mathf.Clamp(activityBatchSize, 2, 6);
     public double WorldUnixSeconds => worldUnixSeconds;
     public DateTime WorldDateTime =>
@@ -361,6 +424,25 @@ public class LLMBrainService : MonoBehaviour
             && backendsByAgent.TryGetValue(agentId.Trim(), out ILLMBackend assigned))
             return assigned;
         return backend;
+    }
+
+    public ILLMBackend GetBackendForConversation(
+        List<ConversationParticipantContext> participants, string initiatorAgentId)
+    {
+        ILLMBackend initiator = GetBackendForAgent(initiatorAgentId);
+        if (initiator != null && !initiator.IsLocal)
+            return initiator;
+
+        if (participants != null)
+        {
+            foreach (ConversationParticipantContext participant in participants)
+            {
+                ILLMBackend candidate = GetBackendForAgent(participant?.agentId);
+                if (candidate != null && !candidate.IsLocal)
+                    return candidate;
+            }
+        }
+        return initiator;
     }
 
     private bool HasAnyBackend => backend != null || backendsByAgent.Count > 0;
@@ -467,7 +549,9 @@ public class LLMBrainService : MonoBehaviour
         relationship.affinity = Mathf.Clamp(relationship.affinity, -10f, 10f);
         relationship.trust = Mathf.Clamp(relationship.trust, 0f, 10f);
         relationship.tension = Mathf.Clamp(relationship.tension, 0f, 10f);
-        relationship.lastEvent = string.IsNullOrWhiteSpace(subject)
+        relationship.lastEvent = IsStaleSnackMystery(subject)
+            ? "ordinary office conversation"
+            : string.IsNullOrWhiteSpace(subject)
             ? eventType : subject.Trim();
         relationship.lastInteractionWorldTime = worldUnixSeconds;
     }
@@ -540,13 +624,15 @@ public class LLMBrainService : MonoBehaviour
     public void Remember(string agentId, string line)
     {
         AgentProfile profile = GetProfile(agentId);
-        if (profile != null && !string.IsNullOrEmpty(line))
+        if (profile != null && !string.IsNullOrEmpty(line)
+            && !IsStaleSnackMystery(line))
             AppendMemory(profile, line);
     }
 
     public void RememberWorldEvent(string description)
     {
-        if (string.IsNullOrWhiteSpace(description))
+        if (string.IsNullOrWhiteSpace(description)
+            || IsStaleSnackMystery(description))
             return;
         worldEvents.Add(description.Trim());
         while (worldEvents.Count > 12)
@@ -564,6 +650,50 @@ public class LLMBrainService : MonoBehaviour
             agentId, availableActions, coworkers, currentState, requestedCount,
             Mathf.Clamp(memoryLines, 1, 2), temperature, requestTimeoutSeconds,
             activityPlanTimeoutSeconds);
+    }
+
+    public async Task<OfficeEpisodePack> GenerateEpisodePackAsync(
+        List<AIWorkerAgent> workers, int requestedCount)
+    {
+        if (episodePlanner == null || workers == null || workers.Count < 2
+            || episodeBackends.Count == 0)
+            return null;
+
+        int providerCount = episodeBackends.Count;
+        int startIndex = Mathf.Abs(nextEpisodeBackendIndex) % providerCount;
+        for (int offset = 0; offset < providerCount; offset++)
+        {
+            int index = (startIndex + offset) % providerCount;
+            EpisodeBackendState provider = episodeBackends[index];
+            if (provider?.backend == null
+                || Time.unscaledTime < provider.circuitOpenUntil)
+                continue;
+
+            OfficeEpisodePack pack = await episodePlanner.GenerateEpisodePackAsync(
+                provider.backend, provider.label, workers,
+                Mathf.Clamp(requestedCount, 4, 10),
+                temperature, Mathf.Min(requestTimeoutSeconds, 45));
+            if (pack != null && pack.beats != null && pack.beats.Length > 0)
+            {
+                provider.consecutiveFailures = 0;
+                provider.circuitOpenUntil = 0f;
+                nextEpisodeBackendIndex = (index + 1) % providerCount;
+                Debug.Log("[Episode director] buffered " + pack.beats.Length
+                    + " beats from " + provider.label + ".", this);
+                return pack;
+            }
+
+            provider.consecutiveFailures++;
+            if (provider.consecutiveFailures >= 3)
+            {
+                provider.circuitOpenUntil = Time.unscaledTime + 60f;
+                provider.consecutiveFailures = 0;
+                Debug.LogWarning("[Episode director] " + provider.label
+                    + " circuit opened for 60 seconds after repeated failures.", this);
+            }
+        }
+
+        return null;
     }
 
     public async Task<ConversationScript> GenerateConversationAsync(
@@ -617,7 +747,8 @@ public class LLMBrainService : MonoBehaviour
         SocialMemoryEntry completed = null;
         foreach (SocialMemoryEntry entry in profile.socialMemory)
         {
-            if (entry == null || entry.status != "open"
+            if (entry == null
+                || (entry.status != "open" && entry.status != "scheduled")
                 || TextUtils.TextSimilarity(entry.subject, subject) < 0.7f)
                 continue;
             completed = entry;
@@ -632,7 +763,8 @@ public class LLMBrainService : MonoBehaviour
                 uniqueProfiles.Add(candidateProfile);
         foreach (AgentProfile candidateProfile in uniqueProfiles)
             foreach (SocialMemoryEntry entry in candidateProfile.socialMemory)
-                if (entry != null && entry.status == "open"
+                if (entry != null
+                    && (entry.status == "open" || entry.status == "scheduled")
                     && string.Equals(entry.sourceAgent, completed.sourceAgent,
                         StringComparison.OrdinalIgnoreCase)
                     && TextUtils.TextSimilarity(entry.subject, completed.subject) >= 0.7f)
@@ -640,6 +772,37 @@ public class LLMBrainService : MonoBehaviour
 
         Debug.Log("[Social memory completed] " + TextUtils.DisplayName(profile, agentId) + ": " +
             TextUtils.FormatSocialMemory(completed), this);
+    }
+
+    public void CompleteScheduledEpisodeMemory(string subject)
+    {
+        if (string.IsNullOrWhiteSpace(subject))
+            return;
+
+        HashSet<AgentProfile> uniqueProfiles = new(profiles.Values);
+        foreach (AgentProfile profile in uniqueProfiles)
+            foreach (SocialMemoryEntry entry in profile.socialMemory)
+                if (entry != null && entry.status == "scheduled"
+                    && TextUtils.TextSimilarity(entry.subject, subject) >= 0.7f)
+                    entry.status = "completed";
+    }
+
+    public List<OfficeEpisodeBeat> RestoreEpisodeReserve()
+    {
+        return persistedEpisodeReserve != null
+            ? new List<OfficeEpisodeBeat>(persistedEpisodeReserve)
+            : new List<OfficeEpisodeBeat>();
+    }
+
+    public void SetEpisodeReserve(IEnumerable<OfficeEpisodeBeat> beats)
+    {
+        persistedEpisodeReserve = new List<OfficeEpisodeBeat>();
+        if (beats == null)
+            return;
+        foreach (OfficeEpisodeBeat beat in beats)
+            if (beat != null && HasEpisodeThought(beat)
+                && !IsStaleSnackMysteryBeat(beat))
+                persistedEpisodeReserve.Add(beat);
     }
 
     private void RememberBirthdayIfToday(AgentProfile profile)
@@ -681,44 +844,25 @@ public class LLMBrainService : MonoBehaviour
     {
         if (!RequiresApiKey())
             return "";
-
-        string[] candidates =
-        {
-            apiKeyEnvironmentVariable,
-            "GLM_API_KEY",
-            "ZHIPUAI_API_KEY",
-            "ZAI_API_KEY"
-        };
-
-        foreach (string candidate in candidates)
-        {
-            if (string.IsNullOrWhiteSpace(candidate))
-                continue;
-            string variableName = candidate.Trim();
-            string value = Environment.GetEnvironmentVariable(variableName);
-            if (string.IsNullOrWhiteSpace(value))
-                value = Environment.GetEnvironmentVariable(
-                    variableName, EnvironmentVariableTarget.User);
-            if (string.IsNullOrWhiteSpace(value))
-                value = Environment.GetEnvironmentVariable(
-                    variableName, EnvironmentVariableTarget.Machine);
-            if (!string.IsNullOrWhiteSpace(value))
-                return value.Trim();
-        }
-
-        return "";
+        return ResolveEnvironmentVariable(apiKeyEnvironmentVariable);
     }
 
     private void ConfigureAgentBrains()
     {
         backendsByAgent.Clear();
+        episodeBackends.Clear();
+        if (backend != null && !backend.IsLocal)
+            episodeBackends.Add(new EpisodeBackendState
+            {
+                label = "default " + model,
+                backend = backend
+            });
         if (agentBrains == null)
             return;
 
         foreach (AgentBrainEndpoint slot in agentBrains)
         {
-            if (slot == null || slot.agentIds == null
-                || string.IsNullOrWhiteSpace(slot.baseUrl)
+            if (slot == null || string.IsNullOrWhiteSpace(slot.baseUrl)
                 || string.IsNullOrWhiteSpace(slot.model))
                 continue;
 
@@ -733,6 +877,17 @@ public class LLMBrainService : MonoBehaviour
 
             ILLMBackend slotBackend = new OpenAICompatibleBackend(
                 slot.baseUrl, key, slot.model);
+            string providerLabel = string.IsNullOrWhiteSpace(slot.label)
+                ? slot.model : slot.label.Trim();
+            if (!slotBackend.IsLocal)
+                episodeBackends.Add(new EpisodeBackendState
+                {
+                    label = providerLabel,
+                    backend = slotBackend
+                });
+
+            if (slot.agentIds == null)
+                continue;
             foreach (string rawAgentId in slot.agentIds)
             {
                 if (string.IsNullOrWhiteSpace(rawAgentId))
@@ -740,8 +895,7 @@ public class LLMBrainService : MonoBehaviour
                 string agentId = rawAgentId.Trim();
                 backendsByAgent[agentId] = slotBackend;
                 Debug.Log("[LLMBrainService] " + agentId + " brain=" +
-                    (string.IsNullOrWhiteSpace(slot.label)
-                        ? slot.model : slot.label + " (" + slot.model + ")"), this);
+                    providerLabel + " (" + slot.model + ")", this);
             }
         }
     }
@@ -796,13 +950,30 @@ public class LLMBrainService : MonoBehaviour
         if (persistedState?.relationships != null)
             foreach (AgentRelationshipState relationship in persistedState.relationships)
                 if (relationship != null)
+                {
+                    if (IsStaleSnackMystery(relationship.lastEvent))
+                        relationship.lastEvent = "ordinary office conversation";
                     relationships[RelationshipKey(
                         relationship.firstAgentId, relationship.secondAgentId)] = relationship;
+                }
 
         if (persistedState?.storyArcs != null)
             foreach (PersistedStoryArcState arc in persistedState.storyArcs)
                 if (arc != null && !string.IsNullOrWhiteSpace(arc.arcId))
+                {
+                    if (IsStaleSnackMystery(arc.establishedFact))
+                        continue;
+                    if (persistedState.version < 3 && string.Equals(
+                            arc.status, "active", StringComparison.OrdinalIgnoreCase))
+                        arc.status = "dormant";
                     storyArcs.Add(arc);
+                }
+
+        persistedEpisodeReserve = persistedState?.episodeReserve != null
+            ? new List<OfficeEpisodeBeat>(persistedState.episodeReserve)
+            : new List<OfficeEpisodeBeat>();
+        persistedEpisodeReserve.RemoveAll(beat =>
+            !HasEpisodeThought(beat) || IsStaleSnackMysteryBeat(beat));
     }
 
     private void RestoreProfile(AgentProfile profile)
@@ -820,9 +991,23 @@ public class LLMBrainService : MonoBehaviour
 
         Replace(profile.memory, saved.memory, 30);
         ReplaceSocialMemory(profile.socialMemory, saved.socialMemory, 30);
+        if (persistedState.version < 3)
+            foreach (SocialMemoryEntry entry in profile.socialMemory)
+                if (entry != null && string.Equals(
+                        entry.status, "open", StringComparison.OrdinalIgnoreCase))
+                    entry.status = "dormant";
         Replace(profile.recentTopics, saved.recentTopics, 8);
         Replace(profile.recentOpenings, saved.recentOpenings, 8);
         Replace(profile.recentUtterances, saved.recentUtterances, 10);
+        profile.memory.RemoveAll(IsStaleSnackMystery);
+        profile.socialMemory.RemoveAll(entry => entry == null
+            || string.IsNullOrWhiteSpace(entry.type)
+            || string.IsNullOrWhiteSpace(entry.sourceAgent)
+            || string.IsNullOrWhiteSpace(entry.subject)
+            || IsStaleSnackMystery(entry.subject));
+        profile.recentTopics.RemoveAll(IsStaleSnackMystery);
+        profile.recentOpenings.RemoveAll(IsStaleSnackMystery);
+        profile.recentUtterances.RemoveAll(IsStaleSnackMystery);
         profile.recentUtterances.RemoveAll(IsLegacyFallbackUtterance);
     }
 
@@ -849,6 +1034,60 @@ public class LLMBrainService : MonoBehaviour
             && LegacyFallbackUtterances.Contains(line.Trim());
     }
 
+    internal static bool IsStaleSnackMystery(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        string lower = text.ToLowerInvariant();
+        if (lower.Contains("sketchpad"))
+            return lower.Trim(' ', '.', '!', '?') == "sketchpad"
+                || lower.Contains("misplaced sketchpad")
+                || lower.Contains("sketchpad found")
+                || lower.Contains("sketchpad on your desk")
+                || lower.Contains("sketchpad left")
+                || lower.Contains("spotted a sketchpad")
+                || lower.Contains("where the sketchpad");
+        if (!lower.Contains("snack"))
+            return false;
+        return lower.Contains("missing snack")
+            || lower.Contains("lost snack")
+            || lower.Contains("snack is missing")
+            || lower.Contains("snacks are missing")
+            || lower.Contains("emergency snack")
+            || lower.Contains("stolen snack")
+            || lower.Contains("snack disappeared")
+            || lower.Contains("snacks disappeared");
+    }
+
+    private static bool IsStaleSnackMysteryBeat(OfficeEpisodeBeat beat)
+    {
+        if (beat == null)
+            return false;
+        if (IsStaleSnackMystery(beat.topic)
+            || IsStaleSnackMystery(beat.memory)
+            || IsStaleSnackMystery(beat.resolvesSubject)
+            || IsStaleSnackMystery(beat.socialEvent?.subject))
+            return true;
+        if (beat.dialogue != null)
+            foreach (OfficeEpisodeDialogueLine line in beat.dialogue)
+                if (IsStaleSnackMystery(line?.line))
+                    return true;
+        if (beat.actions != null)
+            foreach (OfficeEpisodeAction action in beat.actions)
+                if (IsStaleSnackMystery(action?.reason)
+                    || IsStaleSnackMystery(action?.thought))
+                    return true;
+        return false;
+    }
+
+    private static bool HasEpisodeThought(OfficeEpisodeBeat beat)
+    {
+        return beat != null
+            && beat.schemaVersion >= 3
+            && !string.IsNullOrWhiteSpace(beat.thoughtAgentId)
+            && !string.IsNullOrWhiteSpace(beat.privateThought);
+    }
+
     private static void ReplaceSocialMemory(List<SocialMemoryEntry> target,
         List<SocialMemoryEntry> source, int capacity)
     {
@@ -870,7 +1109,8 @@ public class LLMBrainService : MonoBehaviour
 
         HashSet<AgentProfile> uniqueProfiles = new(profiles.Values);
         WorldStateStore.Save(uniqueProfiles, worldEvents, worldUnixSeconds,
-            runtimeStates.Values, relationships.Values, storyArcs);
+            runtimeStates.Values, relationships.Values, storyArcs,
+            persistedEpisodeReserve);
     }
 
     private double CalculateOfflineWorldSeconds(PersistedAgentRuntimeState state)

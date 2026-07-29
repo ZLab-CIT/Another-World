@@ -6,13 +6,14 @@ using UnityEngine;
 [Serializable]
 public sealed class WorldStateSnapshot
 {
-    public int version = 2;
+    public int version = 3;
     public string savedAtUtc;
     public double worldUnixSeconds;
     public List<PersistedAgentState> agents = new();
     public List<PersistedAgentRuntimeState> agentRuntime = new();
     public List<AgentRelationshipState> relationships = new();
     public List<PersistedStoryArcState> storyArcs = new();
+    public List<OfficeEpisodeBeat> episodeReserve = new();
     public List<string> worldEvents = new();
 }
 
@@ -101,7 +102,8 @@ public static class WorldStateStore
     public static void Save(IEnumerable<AgentProfile> profiles, List<string> worldEvents,
         double worldUnixSeconds, IEnumerable<PersistedAgentRuntimeState> agentRuntime,
         IEnumerable<AgentRelationshipState> relationships,
-        IEnumerable<PersistedStoryArcState> storyArcs)
+        IEnumerable<PersistedStoryArcState> storyArcs,
+        IEnumerable<OfficeEpisodeBeat> episodeReserve)
     {
         WorldStateSnapshot snapshot = new()
         {
@@ -110,7 +112,8 @@ public static class WorldStateStore
             worldEvents = Copy(worldEvents),
             agentRuntime = CopyAgentRuntime(agentRuntime),
             relationships = CopyRelationships(relationships),
-            storyArcs = CopyStoryArcs(storyArcs)
+            storyArcs = CopyStoryArcs(storyArcs),
+            episodeReserve = CopyEpisodeReserve(episodeReserve)
         };
 
         HashSet<string> savedAgentIds = new(StringComparer.OrdinalIgnoreCase);
@@ -158,6 +161,18 @@ public static class WorldStateStore
     private static List<string> Copy(List<string> source)
     {
         return source != null ? new List<string>(source) : new List<string>();
+    }
+
+    private static List<OfficeEpisodeBeat> CopyEpisodeReserve(
+        IEnumerable<OfficeEpisodeBeat> source)
+    {
+        List<OfficeEpisodeBeat> result = new();
+        if (source == null)
+            return result;
+        foreach (OfficeEpisodeBeat beat in source)
+            if (beat != null)
+                result.Add(beat);
+        return result;
     }
 
     private static List<SocialMemoryEntry> CopySocialMemory(List<SocialMemoryEntry> source)

@@ -18,6 +18,9 @@ public class AgentPresentation2D : MonoBehaviour
     [SerializeField] private AgentThoughtBubble thoughtBubble;
     [SerializeField] private AgentThoughtBubble speechBubble;
 
+    [Header("Emotion Sprites")]
+    [SerializeField] private Sprite[] emotionSprites;
+
     private Vector2 lastFacing = Vector2.down;
     private GameObject currentHat;
     private Vector3 currentHatStandingOffset;
@@ -30,6 +33,27 @@ public class AgentPresentation2D : MonoBehaviour
 
     public bool ThoughtBubblesEnabled => thoughtBubblesEnabled;
     public bool IsHolding => heldItem != null;
+    public Sprite GetEmotionSprite(AgentEmotion emotion)
+    {
+        int index = emotion switch
+        {
+            AgentEmotion.Happy => 0,
+            AgentEmotion.Lol => 1,
+            AgentEmotion.Romantic => 2,
+            AgentEmotion.Angry => 3,
+            AgentEmotion.Sad => 4,
+            AgentEmotion.Shocked => 5,
+            AgentEmotion.Crying => 6,
+            AgentEmotion.Surprised => 7,
+            AgentEmotion.Cool => 8,
+            AgentEmotion.Confused => 9,
+            AgentEmotion.Sleepy => 10,
+            AgentEmotion.FacePalm => 11,
+            _ => -1
+        };
+        return index >= 0 && emotionSprites != null && index < emotionSprites.Length
+            ? emotionSprites[index] : null;
+    }
 
     public void SetFacing(Vector2 direction)
     {
@@ -335,4 +359,71 @@ public class AgentPresentation2D : MonoBehaviour
             currentHat.transform.localPosition = isSitting ? currentHatSittingOffset : currentHatStandingOffset;
     }
 
+}
+
+public sealed class AgentEmotionDisplay2D : MonoBehaviour
+{
+    private AIWorkerAgent owner;
+    private AgentPresentation2D presentation;
+    private SpriteRenderer icon;
+    private Renderer characterRenderer;
+    private AgentEmotion displayedEmotion = (AgentEmotion)(-1);
+    private float pulseUntil;
+
+    public void Bind(AIWorkerAgent agent, AgentPresentation2D agentPresentation)
+    {
+        owner = agent;
+        presentation = agentPresentation;
+        EnsureDisplay();
+        SetEmotion(owner != null ? owner.CurrentEmotion : AgentEmotion.Neutral);
+    }
+
+    private void LateUpdate()
+    {
+        if (owner == null)
+            return;
+
+        EnsureDisplay();
+        PositionDisplay();
+        float pulse = Time.time < pulseUntil
+            ? 1f + Mathf.Sin(Time.time * 12f) * 0.08f : 1f;
+        icon.transform.localScale = Vector3.one * 0.3f * pulse;
+    }
+
+    public void SetEmotion(AgentEmotion emotion)
+    {
+        EnsureDisplay();
+        if (displayedEmotion == emotion)
+            return;
+        displayedEmotion = emotion;
+        icon.sprite = presentation != null
+            ? presentation.GetEmotionSprite(emotion) : null;
+        icon.enabled = icon.sprite != null;
+        pulseUntil = Time.time + 0.7f;
+    }
+
+    private void EnsureDisplay()
+    {
+        if (icon != null)
+            return;
+
+        characterRenderer = GetComponentInChildren<Renderer>();
+        GameObject display = new(name + " Emotion");
+        display.transform.SetParent(transform, false);
+        icon = display.AddComponent<SpriteRenderer>();
+        icon.sortingOrder = 29900;
+    }
+
+    private void PositionDisplay()
+    {
+        float localTop = 0.8f;
+        if (characterRenderer != null)
+            localTop = transform.InverseTransformPoint(
+                new Vector3(transform.position.x,
+                    characterRenderer.bounds.max.y + 0.14f,
+                    transform.position.z)).y;
+        // Keep reactions beside the face, below world-space speech bubbles.
+        icon.transform.localPosition = new Vector3(0.48f, localTop - 0.24f, 0f);
+        icon.transform.rotation = Quaternion.identity;
+    }
 }

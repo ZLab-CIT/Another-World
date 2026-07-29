@@ -12,6 +12,7 @@ public class AgentConversationController : MonoBehaviour
 
     [SerializeField, Min(0.1f)] private float participantRadius = 1.5f;
     [SerializeField, Min(0.5f)] private float conversationSeparationRadius = 2.25f;
+    [SerializeField, Range(2, 4)] private int maximumConversationSize = 4;
     [SerializeField, Min(1)] private int maxTurns = 5;
     [SerializeField, Min(0.5f)] private float minimumLineSeconds = 3.4f;
     [SerializeField, Min(0.5f)] private float maximumLineSeconds = 6.2f;
@@ -24,6 +25,7 @@ public class AgentConversationController : MonoBehaviour
     private bool inConversation;
     public bool IsInConversation => inConversation;
     public bool IsSociallyCoolingDown => Time.time < nextSocialCheckTime;
+    public static bool IsAnyConversationActive => activeConversationOwner != null;
 
     public static bool IsConversationActiveAt(OfficeActionPoint action)
     {
@@ -248,6 +250,10 @@ public class AgentConversationController : MonoBehaviour
             ConversationIntent intent = speaker.GetConversationIntent(action);
             if (intent == null)
                 continue;
+            if (intent.requiredParticipantNames != null
+                && Array.Exists(intent.requiredParticipantNames,
+                    required => !ContainsSpeaker(speakers, required)))
+                continue;
 
             bool hasTarget = !string.IsNullOrWhiteSpace(intent.intendedPartnerName);
             bool targetPresent = !hasTarget || ContainsSpeaker(speakers, intent.intendedPartnerName);
@@ -278,7 +284,8 @@ public class AgentConversationController : MonoBehaviour
             return false;
         if (action != null && activeConversationActions.Contains(action))
             return false;
-        participants = SelectConversationPair(participants, intendedPartnerName);
+        participants = SelectConversationParticipants(
+            participants, intendedPartnerName, preparedScript);
         if (participants.Count == 0 || HasUnrelatedConversationNearby(participants))
             return false;
         if (action != null)
@@ -602,6 +609,8 @@ public class AgentConversationController : MonoBehaviour
         OrientTowardSpeaker(speakers, speaker);
         HideAll(speakers);
         speaker.ShowSpeech(speaker.DisplayName, line, GetSpeakerColor(speaker));
+        foreach (AIWorkerAgent participant in speakers)
+            participant?.ReactToDialogue(line, participant == speaker);
 
         float seconds = Mathf.Clamp(2.4f + line.Length * 0.095f, minimumLineSeconds, maximumLineSeconds);
         await Task.Delay(Mathf.RoundToInt(seconds * 1000f));
@@ -729,36 +738,42 @@ public class AgentConversationController : MonoBehaviour
         }
     }
 
-    private List<AIWorkerAgent> SelectConversationPair(
-        List<AIWorkerAgent> participants, string intendedPartnerName)
+    private List<AIWorkerAgent> SelectConversationParticipants(
+        List<AIWorkerAgent> participants, string intendedPartnerName,
+        ConversationScript preparedScript)
     {
         List<AIWorkerAgent> result = new();
         if (participants == null)
             return result;
 
-        AIWorkerAgent selected = null;
-        if (!string.IsNullOrWhiteSpace(intendedPartnerName))
-            selected = participants.Find(worker => worker != null
-                && string.Equals(worker.DisplayName, intendedPartnerName,
-                    StringComparison.OrdinalIgnoreCase));
-
-        if (selected == null)
+        List<AIWorkerAgent> eligible = participants.FindAll(worker =>
+            worker != null && worker != owner);
+        if (preparedScript != null)
         {
-            float nearestDistance = float.MaxValue;
-            foreach (AIWorkerAgent worker in participants)
-            {
-                if (worker == null)
-                    continue;
-                float distance = Vector2.Distance(owner.GetPosition(), worker.GetPosition());
-                if (distance >= nearestDistance)
-                    continue;
-                nearestDistance = distance;
-                selected = worker;
-            }
+            eligible.RemoveAll(worker => !preparedScript.turns.Exists(turn =>
+                turn != null && string.Equals(turn.speaker, worker.DisplayName,
+                    StringComparison.OrdinalIgnoreCase)));
         }
 
-        if (selected != null)
-            result.Add(selected);
+        eligible.Sort((left, right) =>
+        {
+            bool leftTarget = string.Equals(left.DisplayName,
+                intendedPartnerName, StringComparison.OrdinalIgnoreCase);
+            bool rightTarget = string.Equals(right.DisplayName,
+                intendedPartnerName, StringComparison.OrdinalIgnoreCase);
+            if (leftTarget != rightTarget)
+                return leftTarget ? -1 : 1;
+            float leftDistance = Vector2.Distance(
+                owner.GetPosition(), left.GetPosition());
+            float rightDistance = Vector2.Distance(
+                owner.GetPosition(), right.GetPosition());
+            return leftDistance.CompareTo(rightDistance);
+        });
+
+        int limit = Mathf.Max(1, maximumConversationSize - 1);
+        for (int i = 0; i < eligible.Count && result.Count < limit; i++)
+            if (!result.Contains(eligible[i]))
+                result.Add(eligible[i]);
         return result;
     }
 

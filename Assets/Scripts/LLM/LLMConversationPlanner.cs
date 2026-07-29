@@ -27,7 +27,8 @@ public class LLMConversationPlanner
             return null;
         ConversationParticipantContext initiator =
             TextUtils.FindParticipant(participants, openingSpeaker);
-        ILLMBackend activeBackend = brain.GetBackendForAgent(initiator?.agentId);
+        ILLMBackend activeBackend = brain.GetBackendForConversation(
+            participants, initiator?.agentId);
         if (activeBackend == null)
             return null;
 
@@ -476,7 +477,10 @@ public class LLMConversationPlanner
 
         foreach (SocialMemoryEntry socialEvent in socialEvents)
         {
-            if (socialEvent == null)
+            if (socialEvent == null
+                || string.IsNullOrWhiteSpace(socialEvent.type)
+                || string.IsNullOrWhiteSpace(socialEvent.sourceAgent)
+                || string.IsNullOrWhiteSpace(socialEvent.subject))
                 continue;
             int listenerCount = 0;
             foreach (ConversationParticipantContext participant in participants)

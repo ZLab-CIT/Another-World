@@ -31,11 +31,14 @@ public class LLMOptions
     public int timeoutSeconds = 30;
     public int maxRetries = 2;
     public float retryBaseDelaySeconds = 2f;
+    public string reasoningEffort;
+    public bool excludeReasoning;
     public CancellationToken cancellationToken = CancellationToken.None;
 }
 
 public interface ILLMBackend
 {
+    bool IsLocal { get; }
     Task<string> CompleteAsync(List<ChatMessage> messages, LLMOptions options = null);
 }
 
@@ -46,6 +49,7 @@ public class OpenAICompatibleBackend : ILLMBackend
     private readonly string model;
     private readonly SemaphoreSlim requestGate = new(1, 1);
     private DateTime cooldownUntilUtc = DateTime.MinValue;
+    public bool IsLocal => IsLocalEndpoint();
 
     public OpenAICompatibleBackend(string baseUrl, string apiKey, string model)
     {
@@ -103,9 +107,18 @@ public class OpenAICompatibleBackend : ILLMBackend
 
         string json = JsonUtility.ToJson(payload);
         json = ReplaceTemperatureJson(json, payload.temperature);
+        if (IsGroqGptOssModel())
+            json = json.Replace("\"max_tokens\":", "\"max_completion_tokens\":");
+        if (ShouldOmitTemperature())
+            json = RemoveJsonNumberField(json, "temperature");
         List<string> extraPayloadFields = new();
         if (options.jsonMode)
             extraPayloadFields.Add("\"response_format\":{\"type\":\"json_object\"}");
+        if (!string.IsNullOrWhiteSpace(options.reasoningEffort))
+            extraPayloadFields.Add("\"reasoning_effort\":\""
+                + EscapeJsonString(options.reasoningEffort.Trim()) + "\"");
+        if (options.excludeReasoning && IsGroqGptOssModel())
+            extraPayloadFields.Add("\"include_reasoning\":false");
         if (IsGlmModel())
             extraPayloadFields.Add("\"thinking\":{\"type\":\"disabled\"}");
 
@@ -176,10 +189,11 @@ public class OpenAICompatibleBackend : ILLMBackend
                     cooldownUntilUtc = DateTime.UtcNow.AddSeconds(cooldownSeconds);
                 }
                 else if (timedOut)
-                    cooldownUntilUtc = DateTime.UtcNow.AddSeconds(30f);
+                    cooldownUntilUtc = DateTime.UtcNow.AddSeconds(
+                        IsLocalEndpoint() ? 3f : 10f);
 
                 string failureMessage = logPrefix + nameof(OpenAICompatibleBackend) + " request failed (" +
-                    responseCode + "): " + requestError +
+                    responseCode + ", " + result + "): " + requestError +
                     (responseCode == 429 || timedOut
                         ? " Model-written scenes are temporarily paused." : "") +
                     FormatRateLimitStatus(remainingRequests, remainingTokens,
@@ -227,7 +241,7 @@ public class OpenAICompatibleBackend : ILLMBackend
     private static bool IsRetryable(long responseCode, UnityWebRequest.Result result)
     {
         return responseCode == 408 || responseCode == 429 || responseCode >= 500
-            || (responseCode <= 0 && result == UnityWebRequest.Result.ConnectionError);
+            || (responseCode <= 0 && result != UnityWebRequest.Result.Success);
     }
 
     private static bool IsRequestTimeout(long responseCode, string requestError)
@@ -287,6 +301,21 @@ public class OpenAICompatibleBackend : ILLMBackend
         return temperaturePattern.Replace(json, "\"temperature\":" + formattedTemperature, 1);
     }
 
+    private static string RemoveJsonNumberField(string json, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(json) || string.IsNullOrWhiteSpace(fieldName))
+            return json;
+        Regex fieldPattern = new(",?\"" + Regex.Escape(fieldName)
+            + "\"\\s*:\\s*[-0-9.Ee+]+");
+        string cleaned = fieldPattern.Replace(json, "", 1);
+        return cleaned.Replace("{,", "{");
+    }
+
+    private static string EscapeJsonString(string value)
+    {
+        return (value ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
+    }
+
     private static Task<UnityWebRequest.Result> WebRequestTask(UnityWebRequest req, CancellationToken cancellationToken)
     {
         return WaitForWebRequest(req, cancellationToken);
@@ -297,6 +326,24 @@ public class OpenAICompatibleBackend : ILLMBackend
         return model.StartsWith("glm-", StringComparison.OrdinalIgnoreCase)
             || baseUrl.IndexOf("z.ai", StringComparison.OrdinalIgnoreCase) >= 0
             || baseUrl.IndexOf("bigmodel", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private bool ShouldOmitTemperature()
+    {
+        return model.StartsWith("gemini-3.5", StringComparison.OrdinalIgnoreCase)
+            || model.StartsWith("gemini-3.6", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsGroqGptOssModel()
+    {
+        return baseUrl.IndexOf("groq.com", StringComparison.OrdinalIgnoreCase) >= 0
+            && model.StartsWith("openai/gpt-oss-", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsLocalEndpoint()
+    {
+        return baseUrl.IndexOf("localhost", StringComparison.OrdinalIgnoreCase) >= 0
+            || baseUrl.IndexOf("127.0.0.1", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static async Task<UnityWebRequest.Result> WaitForWebRequest(

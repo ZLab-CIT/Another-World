@@ -20,22 +20,26 @@ conversation starters, and token-free activity preferences.
 
 ## Hybrid Narrative
 
-`OfficeEventDirector` schedules state-driven story arcs. Unity selects the
-premise, stage, participants, current needs, goals, schedule, memories, and
-relationship. One LLM request writes the complete five-turn scene, including
-the opening and ending. It is played locally without a second generation.
+`OfficeEventDirector` is the active narrative coordinator. It requests a
+buffered pack of executable office beats from a remote provider, validates the
+people, scene actions, dialogue, and timing, then plays those beats locally.
+A pack contains mostly two-to-four-person conversations, one external phone
+call, private thoughts, and optional before/after physical actions.
 
-Story definitions live in `Assets/Resources/OfficeStories` and require no code
-changes. They contain facts, weights, privacy, timing, and consequences, not
-authored dialogue. Initial premises include printer trouble, missing-snack
-gossip, a suspicious shared-drive folder, a lunch plan, and a small office
-victory.
+The episode buffer reduces request frequency and lets the Unity simulation
+continue while the next pack is generated. Groq and Gemini are configured as a
+rotating provider pool with transport retries and per-provider circuit
+breakers. If generation is unavailable, utility movement and physical
+interactions continue while model-authored narrative pauses.
 
-Every arc has an introduction, follow-through, and resolution. The same
-characters later gather again, and the next model prompt receives the factual
-outcome of the earlier stage. Arc progress survives restarts. If generation is
-unavailable, the director postpones the scene instead of repeating authored
-story dialogue.
+Optional data-driven story definitions live in
+`Assets/Resources/OfficeStories`. They contain premises, facts, weights,
+privacy, timing, and consequences rather than authored dialogue. The current
+sample includes printer trouble, calendar conflict, a lost access card, a
+lunch plan, a suspicious shared-drive folder, sudden rain, an unexpected
+package, a Wi-Fi interruption, and a small office victory. This ambient-story
+mode is implemented but disabled in the sample scene while the episode
+director is active.
 
 Physical vending events also contain a data-driven `characterReaction`. After a
 purchase, an affected character immediately displays that reaction and tries to
@@ -50,13 +54,14 @@ line of text to memory.
 ## Token Controls
 
 The application does not impose an hourly or daily request limit. The sample
-scene runs locally, so it has no hosted token bill or provider token quota.
-Prompts are still bounded because local context consumes RAM and CPU time.
+scene uses hosted providers, so provider quotas and any provider billing still
+apply. The application cannot remove those external limits.
 
-Only one local inference request runs at a time. Foreground scenes wait briefly
-for that slot; background planning immediately falls back to utility AI instead
-of freezing an agent in a request queue. Conversations are generated in one
-compact request and activity plans contain three actions.
+One compact request generates a reusable pack of six to ten beats instead of
+making one request per character or dialogue turn. Context is bounded to short
+state, relationship, memory, and recent-topic summaries. Episode output is
+capped, providers rotate, transient transport failures retry with backoff, and
+repeated provider failures open a short circuit breaker.
 
 Conversation and phone-call lines have no authored fallback. The model chooses
 the subject and opening from personality, relationships, current needs, memory,
@@ -65,15 +70,14 @@ that speech attempt rather than repeating a canned line.
 
 ## API Setup
 
-The sample scene uses Ollama's OpenAI-compatible endpoint:
+The sample scene currently uses two OpenAI-compatible remote endpoints:
 
-- `Base Url`: `http://localhost:11434/v1`
-- `Model`: `qwen2.5:1.5b`
-- `Api Key Environment Variable`: empty
+- Groq: `openai/gpt-oss-20b`, key from `GROQ_API_KEY`.
+- Gemini: `gemini-3.5-flash-lite`, key from `GEMINI_API_KEY`.
 
-Install/pull the model once with `ollama pull qwen2.5:1.5b`, then keep Ollama
-running while the Unity simulation runs. The model is intentionally small for
-this machine's available memory.
+Run `Tools/Configure-LLMKeys.ps1` once to store either or both keys in the
+current Windows user's environment. Restart Unity after changing environment
+variables.
 
 Other OpenAI-compatible providers can be configured on `LLMBrainService`:
 
@@ -95,10 +99,10 @@ local utility behavior remains active.
 - `Api Key Environment Variable`: this provider's key name
 - `Model`: model identifier for this brain
 
-For example, Mingyun and Linli can share one Groq model, DianMei and Xiaomei can
-share a second provider, while the remaining characters use local Ollama.
-Agents sharing one entry also share its request gate. Different entries can run
-at the same time.
+Agent-specific routing remains available for legacy conversation and activity
+calls. The active episode director treats all configured remote entries as a
+provider pool and rotates successful requests between them. Local endpoints
+are deliberately excluded from episode generation in the current build.
 
 Do not place literal API keys in the scene. Create environment variables such
 as `WORLD_BRAIN_A_KEY` and `WORLD_BRAIN_B_KEY`, then enter those variable names

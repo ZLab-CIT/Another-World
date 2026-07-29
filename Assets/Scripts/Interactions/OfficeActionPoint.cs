@@ -63,6 +63,8 @@ public class OfficeActionPoint : MonoBehaviour
     private readonly Dictionary<AIWorkerAgent, int> reservedSlots = new();
 
     public int CurrentUsers => reservedSlots.Count;
+    public int Capacity => SlotCount;
+    public int AvailableSlots => Mathf.Max(0, SlotCount - reservedSlots.Count);
 
     private bool IsReservedBy(AIWorkerAgent agent)
     {
