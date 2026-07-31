@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -44,10 +47,24 @@ public interface ILLMBackend
 
 public class OpenAICompatibleBackend : ILLMBackend
 {
+    private sealed class TransportResponse
+    {
+        public long responseCode;
+        public string body;
+        public string error;
+        public string retryAfter;
+        public string remainingRequests;
+        public string remainingTokens;
+        public string requestReset;
+        public string tokenReset;
+        public UnityWebRequest.Result result;
+    }
+
+    private static readonly HttpClient desktopHttpClient = CreateDesktopHttpClient();
     private readonly string baseUrl;
     private readonly string apiKey;
     private readonly string model;
-    private readonly SemaphoreSlim requestGate = new(1, 1);
+    private readonly SemaphoreSlim requestGate = new(2, 2);
     private DateTime cooldownUntilUtc = DateTime.MinValue;
     public bool IsLocal => IsLocalEndpoint();
 
@@ -56,6 +73,22 @@ public class OpenAICompatibleBackend : ILLMBackend
         this.baseUrl = (baseUrl ?? "").TrimEnd('/');
         this.apiKey = apiKey ?? "";
         this.model = model ?? "";
+    }
+
+    private static HttpClient CreateDesktopHttpClient()
+    {
+        IWebProxy systemProxy = WebRequest.GetSystemWebProxy();
+        if (systemProxy != null)
+            systemProxy.Credentials = CredentialCache.DefaultCredentials;
+
+        HttpClientHandler handler = new()
+        {
+            UseProxy = systemProxy != null,
+            Proxy = systemProxy,
+            AutomaticDecompression = DecompressionMethods.GZip
+                | DecompressionMethods.Deflate
+        };
+        return new HttpClient(handler, true);
     }
 
     public async Task<string> CompleteAsync(List<ChatMessage> messages, LLMOptions options = null)
@@ -129,37 +162,16 @@ public class OpenAICompatibleBackend : ILLMBackend
         int maxAttempts = Mathf.Max(1, options.maxRetries + 1);
         for (int attempt = 0; attempt < maxAttempts; attempt++)
         {
-            long responseCode;
-            string responseBody;
-            string requestError;
-            string retryAfter;
-            string remainingRequests;
-            string remainingTokens;
-            string requestReset;
-            string tokenReset;
-            UnityWebRequest.Result result;
-
-            using (UnityWebRequest req = new(baseUrl + "/chat/completions", "POST"))
-            {
-                req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
-                req.downloadHandler = new DownloadHandlerBuffer();
-                req.SetRequestHeader("Content-Type", "application/json");
-                if (!string.IsNullOrEmpty(apiKey))
-                    req.SetRequestHeader("Authorization", "Bearer " + apiKey);
-                req.timeout = options.timeoutSeconds > 0 ? options.timeoutSeconds : 30;
-
-                result = await WebRequestTask(req, options.cancellationToken);
-                responseCode = req.responseCode;
-                responseBody = req.downloadHandler != null ? req.downloadHandler.text : "";
-                requestError = req.error;
-                retryAfter = req.GetResponseHeader("Retry-After");
-                remainingRequests =
-                    req.GetResponseHeader("x-ratelimit-remaining-requests");
-                remainingTokens =
-                    req.GetResponseHeader("x-ratelimit-remaining-tokens");
-                requestReset = req.GetResponseHeader("x-ratelimit-reset-requests");
-                tokenReset = req.GetResponseHeader("x-ratelimit-reset-tokens");
-            }
+            TransportResponse response = await SendAsync(json, options);
+            long responseCode = response.responseCode;
+            string responseBody = response.body;
+            string requestError = response.error;
+            string retryAfter = response.retryAfter;
+            string remainingRequests = response.remainingRequests;
+            string remainingTokens = response.remainingTokens;
+            string requestReset = response.requestReset;
+            string tokenReset = response.tokenReset;
+            UnityWebRequest.Result result = response.result;
 
             if (result != UnityWebRequest.Result.Success)
             {
@@ -168,7 +180,17 @@ public class OpenAICompatibleBackend : ILLMBackend
 
                 bool timedOut = IsRequestTimeout(responseCode, requestError);
                 bool serviceOverloaded = IsServiceOverloaded(responseCode, responseBody);
-                bool retryable = !timedOut && IsRetryable(responseCode, result);
+                bool certificateFailure = IsCertificateFailure(requestError);
+                bool permissionFailure = responseCode == 401 || responseCode == 403;
+                bool jsonValidationFailure = options.jsonMode
+                    && responseCode == 400
+                    && !string.IsNullOrWhiteSpace(responseBody)
+                    && (responseBody.Contains("json_validate_failed")
+                        || responseBody.Contains("Failed to generate JSON")
+                        || responseBody.Contains("Failed to validate JSON"));
+                bool retryable = jsonValidationFailure
+                    || !timedOut && !certificateFailure && !permissionFailure
+                    && IsRetryable(responseCode, result);
                 if (retryable && attempt + 1 < maxAttempts)
                 {
                     float delaySeconds = GetRetryDelaySeconds(
@@ -191,14 +213,23 @@ public class OpenAICompatibleBackend : ILLMBackend
                 else if (timedOut)
                     cooldownUntilUtc = DateTime.UtcNow.AddSeconds(
                         IsLocalEndpoint() ? 3f : 10f);
+                else if (certificateFailure)
+                    cooldownUntilUtc = DateTime.UtcNow.AddMinutes(5);
+                else if (permissionFailure)
+                    cooldownUntilUtc = DateTime.UtcNow.AddMinutes(15);
+                else if (responseCode <= 0)
+                    cooldownUntilUtc = DateTime.UtcNow.AddSeconds(60);
 
                 string failureMessage = logPrefix + nameof(OpenAICompatibleBackend) + " request failed (" +
                     responseCode + ", " + result + "): " + requestError +
                     (responseCode == 429 || timedOut
                         ? " Model-written scenes are temporarily paused." : "") +
+                    (permissionFailure
+                        ? " The key, project, or model permission was rejected; "
+                            + "this provider is paused for 15 minutes." : "") +
                     FormatRateLimitStatus(remainingRequests, remainingTokens,
                         requestReset, tokenReset) +
-                    (string.IsNullOrWhiteSpace(responseBody) ? "" : "\n" + responseBody);
+                    FormatFailureBody(responseBody);
                 if (serviceOverloaded)
                     Debug.Log(failureMessage);
                 else
@@ -238,6 +269,139 @@ public class OpenAICompatibleBackend : ILLMBackend
         return null;
     }
 
+    private static string FormatFailureBody(string responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody))
+            return "";
+        if (responseBody.Contains("json_validate_failed")
+            || responseBody.Contains("Failed to generate JSON")
+            || responseBody.Contains("Failed to validate JSON"))
+            return "\nProvider could not produce valid structured JSON.";
+        const int limit = 600;
+        string compact = responseBody.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return "\n" + (compact.Length <= limit
+            ? compact : compact.Substring(0, limit) + "...");
+    }
+
+    private async Task<TransportResponse> SendAsync(string json, LLMOptions options)
+    {
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+        return await SendWithDesktopHttpAsync(json, options);
+#else
+        return await SendWithUnityWebRequestAsync(json, options);
+#endif
+    }
+
+    private async Task<TransportResponse> SendWithDesktopHttpAsync(
+        string json, LLMOptions options)
+    {
+        using CancellationTokenSource timeout =
+            CancellationTokenSource.CreateLinkedTokenSource(
+                options.cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(
+            options.timeoutSeconds > 0 ? options.timeoutSeconds : 30));
+        try
+        {
+            using HttpRequestMessage request = new(
+                HttpMethod.Post, baseUrl + "/chat/completions");
+            request.Content = new StringContent(
+                json, Encoding.UTF8, "application/json");
+            if (!string.IsNullOrEmpty(apiKey))
+                request.Headers.Authorization =
+                    new AuthenticationHeaderValue("Bearer", apiKey);
+
+            using HttpResponseMessage response =
+                await desktopHttpClient.SendAsync(
+                    request, HttpCompletionOption.ResponseHeadersRead,
+                    timeout.Token);
+            string body = response.Content != null
+                ? await response.Content.ReadAsStringAsync()
+                : "";
+            return new TransportResponse
+            {
+                responseCode = (long)response.StatusCode,
+                body = body,
+                error = response.IsSuccessStatusCode
+                    ? "" : response.ReasonPhrase,
+                retryAfter = ReadHeader(response, "Retry-After"),
+                remainingRequests =
+                    ReadHeader(response, "x-ratelimit-remaining-requests"),
+                remainingTokens =
+                    ReadHeader(response, "x-ratelimit-remaining-tokens"),
+                requestReset =
+                    ReadHeader(response, "x-ratelimit-reset-requests"),
+                tokenReset =
+                    ReadHeader(response, "x-ratelimit-reset-tokens"),
+                result = response.IsSuccessStatusCode
+                    ? UnityWebRequest.Result.Success
+                    : UnityWebRequest.Result.ProtocolError
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            return new TransportResponse
+            {
+                error = options.cancellationToken.IsCancellationRequested
+                    ? "Request cancelled" : "Request timeout",
+                result = UnityWebRequest.Result.ConnectionError
+            };
+        }
+        catch (HttpRequestException exception)
+        {
+            return new TransportResponse
+            {
+                error = exception.Message,
+                result = UnityWebRequest.Result.ConnectionError
+            };
+        }
+    }
+
+    private static string ReadHeader(HttpResponseMessage response, string name)
+    {
+        if (response.Headers.TryGetValues(name, out IEnumerable<string> values))
+            return string.Join(",", values);
+        if (response.Content != null
+            && response.Content.Headers.TryGetValues(
+                name, out IEnumerable<string> contentValues))
+            return string.Join(",", contentValues);
+        return null;
+    }
+
+    private async Task<TransportResponse> SendWithUnityWebRequestAsync(
+        string json, LLMOptions options)
+    {
+        using UnityWebRequest request =
+            new(baseUrl + "/chat/completions", "POST");
+        request.uploadHandler =
+            new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!string.IsNullOrEmpty(apiKey))
+            request.SetRequestHeader("Authorization", "Bearer " + apiKey);
+        request.timeout = options.timeoutSeconds > 0
+            ? options.timeoutSeconds : 30;
+
+        UnityWebRequest.Result result =
+            await WebRequestTask(request, options.cancellationToken);
+        return new TransportResponse
+        {
+            responseCode = request.responseCode,
+            body = request.downloadHandler != null
+                ? request.downloadHandler.text : "",
+            error = request.error,
+            retryAfter = request.GetResponseHeader("Retry-After"),
+            remainingRequests =
+                request.GetResponseHeader("x-ratelimit-remaining-requests"),
+            remainingTokens =
+                request.GetResponseHeader("x-ratelimit-remaining-tokens"),
+            requestReset =
+                request.GetResponseHeader("x-ratelimit-reset-requests"),
+            tokenReset =
+                request.GetResponseHeader("x-ratelimit-reset-tokens"),
+            result = result
+        };
+    }
+
     private static bool IsRetryable(long responseCode, UnityWebRequest.Result result)
     {
         return responseCode == 408 || responseCode == 429 || responseCode >= 500
@@ -248,6 +412,18 @@ public class OpenAICompatibleBackend : ILLMBackend
     {
         return responseCode <= 0 && !string.IsNullOrWhiteSpace(requestError)
             && requestError.IndexOf("timeout", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static bool IsCertificateFailure(string requestError)
+    {
+        if (string.IsNullOrWhiteSpace(requestError))
+            return false;
+        return requestError.IndexOf("certificate",
+                   StringComparison.OrdinalIgnoreCase) >= 0
+            || requestError.IndexOf("SSL",
+                   StringComparison.OrdinalIgnoreCase) >= 0
+            || requestError.IndexOf("authentication",
+                   StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static bool IsServiceOverloaded(long responseCode, string responseBody)

@@ -17,5 +17,9 @@ MonoBehaviour:
   kind: 1
   weight: 1
   topic: the printer produced three blank pages and one page nobody recognizes
-  memory: '{speaker} asked {target} to investigate a strange page from the printer.'
+  memory: '{speaker} noticed the strange printer pages and decided to inspect the machine.'
   publicAnnouncement: 1
+  requiresAction: 1
+  requiredAction: 7
+  preferredActorAgentId: linli
+  actionDurationSeconds: 6

@@ -29,6 +29,7 @@ public class VendingEventDispatcher : MonoBehaviour
     [SerializeField] private float rareGachaWeight = 3f;
     [SerializeField] private float epicGachaWeight = 1f;
     [SerializeField] private float legendaryGachaWeight = 0.3f;
+    [SerializeField] private bool includeHatsInGacha;
 
     private static Sprite cachedWhiteSprite;
 
@@ -67,6 +68,12 @@ public class VendingEventDispatcher : MonoBehaviour
             announcer = FindFirstObjectByType<VendingEventAnnouncer>();
     }
 
+    private IEnumerator Start()
+    {
+        yield return null;
+        RestoreFurniture();
+    }
+
     public void TriggerEvent(VendingEventSO evt)
     {
         if (evt == null)
@@ -82,7 +89,10 @@ public class VendingEventDispatcher : MonoBehaviour
 
     public VendingEventSO PickEvent(bool cosmetic)
     {
-        return catalog.PickWeighted(evt => (evt is IVendingGachaEvent) == cosmetic, GetEventWeight);
+        return catalog.PickWeighted(evt =>
+                (evt is IVendingGachaEvent) == cosmetic
+                && (includeHatsInGacha || evt is not VendingHatEventSO),
+            GetEventWeight);
     }
 
     public void ShowOfflineCoupon(string userId, OfflineCouponReward reward)
@@ -180,6 +190,8 @@ public class VendingEventDispatcher : MonoBehaviour
     {
         if (evt == null)
             return 0f;
+        if (!includeHatsInGacha && evt is VendingHatEventSO)
+            return 0f;
 
         return evt is IVendingGachaEvent gacha
             ? GetCosmeticRarityWeight(gacha.Rarity)
@@ -223,10 +235,16 @@ public class VendingEventDispatcher : MonoBehaviour
         }
     }
 
-    private void SpawnFurniture(VendingFurnitureEventSO evt, List<AIWorkerAgent> targets)
+    private void SpawnFurniture(VendingFurnitureEventSO evt,
+        List<AIWorkerAgent> targets,
+        PersistedFurnitureState restored = null,
+        bool showPresentation = true,
+        bool remember = true)
     {
         OfficeGrid2D grid = FindFirstObjectByType<OfficeGrid2D>();
-        Vector3 position = ResolveFurniturePosition(evt, targets, grid);
+        Vector3 position = restored != null
+            ? new Vector3(restored.positionX, restored.positionY, restored.positionZ)
+            : ResolveFurniturePosition(evt, targets, grid);
         string socketId = ResolveSocketId(evt);
         ClearFurnitureSocket(socketId);
 
@@ -241,7 +259,9 @@ public class VendingEventDispatcher : MonoBehaviour
             furniture = new GameObject("Furniture_" + evt.displayName);
             furniture.transform.position = position;
             SpriteRenderer sr = furniture.AddComponent<SpriteRenderer>();
-            Sprite furnitureSprite = PickSprite(evt.furnitureSprites);
+            Sprite furnitureSprite = restored != null
+                ? FindSprite(evt.furnitureSprites, restored.spriteName)
+                : PickSprite(evt.furnitureSprites);
             if (furnitureSprite == null)
                 furnitureSprite = evt.icon;
             pickedSprite = furnitureSprite;
@@ -267,13 +287,25 @@ public class VendingEventDispatcher : MonoBehaviour
             marker = furniture.AddComponent<FurnitureSocketItem>();
         marker.Initialize(socketId);
 
-        if (announcer != null)
+        if (showPresentation && announcer != null)
         {
             string objectName = pickedSprite != null ? pickedSprite.name : evt.displayName;
             announcer.Show("Appeared: " + objectName, "Placed at " + socketId, pickedSprite != null ? pickedSprite : evt.icon, 1.6f);
         }
 
-        HighlightWorldPosition(position, 3.5f);
+        if (showPresentation)
+            HighlightWorldPosition(position, 3.5f);
+
+        if (remember)
+            LLMBrainService.Instance?.RememberFurniture(new PersistedFurnitureState
+            {
+                socketId = socketId,
+                eventId = evt.eventId,
+                spriteName = pickedSprite != null ? pickedSprite.name : "",
+                positionX = position.x,
+                positionY = position.y,
+                positionZ = position.z
+            });
 
         if (evt.furnitureKind == UpgradeableFurnitureKind.Plant)
         {
@@ -281,6 +313,37 @@ public class VendingEventDispatcher : MonoBehaviour
             foreach (AIWorkerAgent agent in agents)
                 agent.RefreshActionPoints();
         }
+    }
+
+    private void RestoreFurniture()
+    {
+        LLMBrainService brain = LLMBrainService.Instance;
+        if (brain == null)
+            return;
+        foreach (PersistedFurnitureState state in brain.RestoreFurniture())
+        {
+            if (state == null)
+                continue;
+            VendingFurnitureEventSO evt = events.Find(candidate =>
+                candidate is VendingFurnitureEventSO
+                && string.Equals(candidate.eventId, state.eventId,
+                    System.StringComparison.OrdinalIgnoreCase))
+                as VendingFurnitureEventSO;
+            if (evt != null)
+                SpawnFurniture(evt, new List<AIWorkerAgent>(), state, false, false);
+        }
+    }
+
+    private static Sprite FindSprite(Sprite[] sprites, string spriteName)
+    {
+        if (sprites == null || string.IsNullOrWhiteSpace(spriteName))
+            return null;
+        foreach (Sprite sprite in sprites)
+            if (sprite != null && string.Equals(
+                    sprite.name, spriteName,
+                    System.StringComparison.OrdinalIgnoreCase))
+                return sprite;
+        return null;
     }
 
     private Vector3 ResolveFurniturePosition(VendingFurnitureEventSO evt, List<AIWorkerAgent> targets, OfficeGrid2D grid)

@@ -127,6 +127,15 @@ public class OfficeActionPoint : MonoBehaviour
     public void ApplyTo(AIWorkerAgent agent)
     {
         agent.ApplyEffects(energyChange, focusChange, socialChange, productivityChange);
+        if (actionType == OfficeActionType.Printer)
+        {
+            OfficePrinterController printer =
+                GetComponentInParent<OfficePrinterController>()
+                ?? FindFirstObjectByType<OfficePrinterController>();
+            printer?.SetStoryStage(2);
+            OfficeEventDirector.Instance?.NotifyStoryActionCompleted(
+                actionType, agent);
+        }
     }
 
     public Transform GetItemPlacementTransform()

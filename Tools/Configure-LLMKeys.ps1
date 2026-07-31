@@ -60,5 +60,5 @@ Configure-Key -Name "GROQ_API_KEY" -Provider "Groq"
 Configure-Key -Name "GEMINI_API_KEY" -Provider "Gemini"
 
 Write-Host ""
-Write-Host "Restart Play Mode so LLMBrainService rebuilds its provider pool."
+Write-Host "Exit and reopen Unity so it cannot retain an older process-level key."
 Write-Host "Ollama or another local model service is not required."

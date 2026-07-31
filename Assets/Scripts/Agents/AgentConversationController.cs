@@ -7,8 +7,9 @@ using UnityEngine;
 [RequireComponent(typeof(AIWorkerAgent))]
 public class AgentConversationController : MonoBehaviour
 {
+    private const int MaximumConcurrentConversations = 2;
     private static readonly HashSet<OfficeActionPoint> activeConversationActions = new();
-    private static AgentConversationController activeConversationOwner;
+    private static readonly HashSet<AgentConversationController> activeConversationOwners = new();
 
     [SerializeField, Min(0.1f)] private float participantRadius = 1.5f;
     [SerializeField, Min(0.5f)] private float conversationSeparationRadius = 2.25f;
@@ -25,7 +26,17 @@ public class AgentConversationController : MonoBehaviour
     private bool inConversation;
     public bool IsInConversation => inConversation;
     public bool IsSociallyCoolingDown => Time.time < nextSocialCheckTime;
-    public static bool IsAnyConversationActive => activeConversationOwner != null;
+    public static int ActiveConversationCount
+    {
+        get
+        {
+            PruneConversationOwners();
+            return activeConversationOwners.Count;
+        }
+    }
+    public static bool IsAnyConversationActive => ActiveConversationCount > 0;
+    public static bool HasConversationCapacity =>
+        ActiveConversationCount < MaximumConcurrentConversations;
 
     public static bool IsConversationActiveAt(OfficeActionPoint action)
     {
@@ -39,8 +50,7 @@ public class AgentConversationController : MonoBehaviour
 
     private void OnDisable()
     {
-        if (activeConversationOwner == this)
-            activeConversationOwner = null;
+        activeConversationOwners.Remove(this);
         if (ownedConversationAction != null)
             activeConversationActions.Remove(ownedConversationAction);
         ownedConversationAction = null;
@@ -195,7 +205,8 @@ public class AgentConversationController : MonoBehaviour
     {
         if (inConversation || action == null || !IsSocialSpot(action.actionType))
             return;
-        if (activeConversationActions.Contains(action))
+        if (activeConversationActions.Contains(action)
+            || !HasConversationCapacity)
             return;
 
         List<AIWorkerAgent> participants = FindNearbyParticipants(action, participantRadius);
@@ -219,7 +230,8 @@ public class AgentConversationController : MonoBehaviour
             return;
         }
 
-        BeginGeneratedConversation(action, participants, intent);
+        if (!BeginGeneratedConversation(action, participants, intent))
+            EndSilentSocialWait(speakers);
     }
 
     private static void EndSilentSocialWait(List<AIWorkerAgent> speakers)
@@ -280,7 +292,9 @@ public class AgentConversationController : MonoBehaviour
         string line, string topic, string intendedPartnerName, Action onOpeningSpoken = null,
         ConversationScript preparedScript = null)
     {
-        if (activeConversationOwner != null && activeConversationOwner != this)
+        PruneConversationOwners();
+        if (!activeConversationOwners.Contains(this)
+            && activeConversationOwners.Count >= MaximumConcurrentConversations)
             return false;
         if (action != null && activeConversationActions.Contains(action))
             return false;
@@ -293,7 +307,7 @@ public class AgentConversationController : MonoBehaviour
             activeConversationActions.Add(action);
             ownedConversationAction = action;
         }
-        activeConversationOwner = this;
+        activeConversationOwners.Add(this);
 
         owner.ClearConversationDirective();
         SetConversationState(owner, true);
@@ -318,8 +332,7 @@ public class AgentConversationController : MonoBehaviour
             if (action != null)
                 activeConversationActions.Remove(action);
             ownedConversationAction = null;
-            if (activeConversationOwner == this)
-                activeConversationOwner = null;
+            activeConversationOwners.Remove(this);
             return false;
         }
 
@@ -328,22 +341,23 @@ public class AgentConversationController : MonoBehaviour
         return true;
     }
 
-    private void BeginGeneratedConversation(OfficeActionPoint action,
+    private bool BeginGeneratedConversation(OfficeActionPoint action,
         List<AIWorkerAgent> participants, ConversationIntent intent)
     {
         if (intent == null)
-            return;
+            return false;
 
         string intendedPartner = intent.intendedPartnerName ?? "";
         string opener = intent.openingLine?.Trim() ?? "";
         string topic = intent.topic?.Trim() ?? "";
 
-        BeginConversation(action, participants, opener, topic, intendedPartner,
+        return BeginConversation(action, participants, opener, topic, intendedPartner,
             intent.onOpeningSpoken, intent.preparedScript);
     }
 
     public bool BeginDirectConversation(AIWorkerAgent target, string openingLine, string topic,
-        ConversationScript preparedScript = null, bool routineConversationReserved = false)
+        ConversationScript preparedScript = null, bool routineConversationReserved = false,
+        Action onOpeningSpoken = null)
     {
         AgentConversationController targetConversation = GetController(target);
         if (target == null || target == owner || inConversation
@@ -356,7 +370,7 @@ public class AgentConversationController : MonoBehaviour
 
         return BeginConversation(null, new List<AIWorkerAgent> { target }, openingLine,
             string.IsNullOrWhiteSpace(topic) ? openingLine : topic,
-            target.DisplayName, preparedScript: preparedScript);
+            target.DisplayName, onOpeningSpoken, preparedScript);
     }
 
     private async void RunConversation(OfficeActionPoint action, List<AIWorkerAgent> participants,
@@ -379,9 +393,12 @@ public class AgentConversationController : MonoBehaviour
         try
         {
             contexts = BuildParticipantContexts(speakers);
-            int replyCount = Mathf.Clamp(maxTurns - 1, 1, 4);
-            if (speakers.Count > 2)
-                replyCount = Mathf.Max(replyCount, Mathf.Min(4, speakers.Count - 1));
+            int maximumReplies = Mathf.Clamp(maxTurns - 1, 1, 4);
+            int minimumReplies = speakers.Count > 2
+                ? Mathf.Min(maximumReplies, speakers.Count - 1)
+                : Mathf.Min(maximumReplies, 2);
+            int replyCount = UnityEngine.Random.Range(
+                minimumReplies, maximumReplies + 1);
 
             List<string> speakerOrder = BuildSpeakerOrder(speakers, intendedPartnerName,
                 replyCount, topic, openerLine);
@@ -443,9 +460,14 @@ public class AgentConversationController : MonoBehaviour
             if (action != null)
                 activeConversationActions.Remove(action);
             ownedConversationAction = null;
-            if (activeConversationOwner == this)
-                activeConversationOwner = null;
+            activeConversationOwners.Remove(this);
         }
+    }
+
+    private static void PruneConversationOwners()
+    {
+        activeConversationOwners.RemoveWhere(controller =>
+            controller == null || !controller.inConversation);
     }
 
     private static List<ConversationParticipantContext> BuildParticipantContexts(
@@ -720,24 +742,6 @@ public class AgentConversationController : MonoBehaviour
         return result;
     }
 
-    private void AddLateParticipants(OfficeActionPoint action,
-        List<AIWorkerAgent> participants, List<AIWorkerAgent> speakers)
-    {
-        List<AIWorkerAgent> nearby = FindNearbyParticipants(action, participantRadius);
-        foreach (AIWorkerAgent worker in nearby)
-        {
-            if (worker == null || speakers.Contains(worker))
-                continue;
-
-            participants.Add(worker);
-            speakers.Add(worker);
-            worker.ClearConversationDirective();
-            SetConversationState(worker, true);
-            worker.ExtendActing(30f);
-            worker.HideThought();
-        }
-    }
-
     private List<AIWorkerAgent> SelectConversationParticipants(
         List<AIWorkerAgent> participants, string intendedPartnerName,
         ConversationScript preparedScript)
@@ -876,20 +880,6 @@ public class AgentConversationController : MonoBehaviour
             speaker.CompleteConversationActivity(conversationSucceeded);
             speaker.EndSocialConversation(leaveSoon, linger);
         }
-    }
-
-    private static string BuildParticipantNames(List<AIWorkerAgent> speakers)
-    {
-        string result = "";
-        foreach (AIWorkerAgent speaker in speakers)
-        {
-            if (speaker == null)
-                continue;
-
-            result += (result.Length > 0 ? ", " : "") + speaker.DisplayName;
-        }
-
-        return result;
     }
 
     public static bool IsSocialSpot(OfficeActionType type)

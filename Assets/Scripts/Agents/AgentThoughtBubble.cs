@@ -72,6 +72,36 @@ public class AgentThoughtBubble : MonoBehaviour
         activeRoutine = StartCoroutine(FadeInOnly());
     }
 
+    public void ShowPhoneStatus(string speakerName, bool incoming, Color speakerColor)
+    {
+        ConfigurePhoneStyle(speakerColor);
+        string color = ColorUtility.ToHtmlStringRGB(speakerColor);
+        string status = incoming ? "INCOMING CALL" : "ON CALL";
+        string name = SanitizeRichText(speakerName);
+        if (!PrepareContent("<b><color=#" + color + ">\u260E " + status
+                + "</color></b>\n" + name))
+            return;
+
+        if (activeRoutine != null)
+            StopCoroutine(activeRoutine);
+        activeRoutine = StartCoroutine(FadeInOnly());
+    }
+
+    public void ShowPhoneDialogue(string speakerName, string content, Color speakerColor)
+    {
+        ConfigurePhoneStyle(speakerColor);
+        string color = ColorUtility.ToHtmlStringRGB(speakerColor);
+        string header = SanitizeRichText(speakerName);
+        string body = SanitizeRichText(content);
+        if (!PrepareContent("<b><color=#" + color + ">\u260E ON CALL | "
+                + header + "</color></b>\n" + body))
+            return;
+
+        if (activeRoutine != null)
+            StopCoroutine(activeRoutine);
+        activeRoutine = StartCoroutine(FadeInOnly());
+    }
+
     public void ConfigureThoughtStyle()
     {
         EnsureBackgroundImage();
@@ -84,6 +114,14 @@ public class AgentThoughtBubble : MonoBehaviour
         EnsureBackgroundImage();
         if (backgroundImage != null)
             backgroundImage.color = Color.Lerp(Color.white, speakerColor, 0.18f);
+    }
+
+    private void ConfigurePhoneStyle(Color speakerColor)
+    {
+        EnsureBackgroundImage();
+        if (backgroundImage != null)
+            backgroundImage.color = Color.Lerp(
+                new Color(0.9f, 0.97f, 1f, 0.99f), speakerColor, 0.12f);
     }
 
     public void Hide()

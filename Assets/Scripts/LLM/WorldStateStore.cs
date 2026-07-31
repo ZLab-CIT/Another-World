@@ -6,15 +6,35 @@ using UnityEngine;
 [Serializable]
 public sealed class WorldStateSnapshot
 {
-    public int version = 3;
+    public int version = 5;
     public string savedAtUtc;
     public double worldUnixSeconds;
     public List<PersistedAgentState> agents = new();
     public List<PersistedAgentRuntimeState> agentRuntime = new();
     public List<AgentRelationshipState> relationships = new();
-    public List<PersistedStoryArcState> storyArcs = new();
     public List<OfficeEpisodeBeat> episodeReserve = new();
     public List<string> worldEvents = new();
+    public List<PersistedOfficeStoryState> officeStories = new();
+    public List<PersistedFurnitureState> furniture = new();
+}
+
+[Serializable]
+public sealed class PersistedOfficeStoryState
+{
+    public string storyId;
+    public int started;
+    public int resolved;
+}
+
+[Serializable]
+public sealed class PersistedFurnitureState
+{
+    public string socketId;
+    public string eventId;
+    public string spriteName;
+    public float positionX;
+    public float positionY;
+    public float positionZ;
 }
 
 [Serializable]
@@ -62,19 +82,6 @@ public sealed class AgentRelationshipState
     public double lastInteractionWorldTime;
 }
 
-[Serializable]
-public sealed class PersistedStoryArcState
-{
-    public string arcId;
-    public string storyId;
-    public string speakerAgentId;
-    public string targetAgentId;
-    public string establishedFact;
-    public int stage;
-    public double nextStageWorldTime;
-    public string status;
-}
-
 public static class WorldStateStore
 {
     private const string FileName = "another-world-state.json";
@@ -102,8 +109,9 @@ public static class WorldStateStore
     public static void Save(IEnumerable<AgentProfile> profiles, List<string> worldEvents,
         double worldUnixSeconds, IEnumerable<PersistedAgentRuntimeState> agentRuntime,
         IEnumerable<AgentRelationshipState> relationships,
-        IEnumerable<PersistedStoryArcState> storyArcs,
-        IEnumerable<OfficeEpisodeBeat> episodeReserve)
+        IEnumerable<OfficeEpisodeBeat> episodeReserve,
+        IEnumerable<PersistedOfficeStoryState> officeStories,
+        IEnumerable<PersistedFurnitureState> furniture)
     {
         WorldStateSnapshot snapshot = new()
         {
@@ -112,8 +120,9 @@ public static class WorldStateStore
             worldEvents = Copy(worldEvents),
             agentRuntime = CopyAgentRuntime(agentRuntime),
             relationships = CopyRelationships(relationships),
-            storyArcs = CopyStoryArcs(storyArcs),
-            episodeReserve = CopyEpisodeReserve(episodeReserve)
+            episodeReserve = CopyEpisodeReserve(episodeReserve),
+            officeStories = CopyOfficeStories(officeStories),
+            furniture = CopyFurniture(furniture)
         };
 
         HashSet<string> savedAgentIds = new(StringComparer.OrdinalIgnoreCase);
@@ -151,6 +160,44 @@ public static class WorldStateStore
             Debug.LogWarning(nameof(WorldStateStore) + " could not save state: " +
                 exception.Message);
         }
+    }
+
+    private static List<PersistedOfficeStoryState> CopyOfficeStories(
+        IEnumerable<PersistedOfficeStoryState> source)
+    {
+        List<PersistedOfficeStoryState> result = new();
+        if (source == null)
+            return result;
+        foreach (PersistedOfficeStoryState state in source)
+            if (state != null && !string.IsNullOrWhiteSpace(state.storyId))
+                result.Add(new PersistedOfficeStoryState
+                {
+                    storyId = state.storyId,
+                    started = Mathf.Max(0, state.started),
+                    resolved = Mathf.Max(0, state.resolved)
+                });
+        return result;
+    }
+
+    private static List<PersistedFurnitureState> CopyFurniture(
+        IEnumerable<PersistedFurnitureState> source)
+    {
+        List<PersistedFurnitureState> result = new();
+        if (source == null)
+            return result;
+        foreach (PersistedFurnitureState state in source)
+            if (state != null && !string.IsNullOrWhiteSpace(state.socketId)
+                && !string.IsNullOrWhiteSpace(state.eventId))
+                result.Add(new PersistedFurnitureState
+                {
+                    socketId = state.socketId,
+                    eventId = state.eventId,
+                    spriteName = state.spriteName,
+                    positionX = state.positionX,
+                    positionY = state.positionY,
+                    positionZ = state.positionZ
+                });
+        return result;
     }
 
     private static string GetPath()
@@ -222,15 +269,4 @@ public static class WorldStateStore
         return result;
     }
 
-    private static List<PersistedStoryArcState> CopyStoryArcs(
-        IEnumerable<PersistedStoryArcState> source)
-    {
-        List<PersistedStoryArcState> result = new();
-        if (source == null)
-            return result;
-        foreach (PersistedStoryArcState state in source)
-            if (state != null)
-                result.Add(state);
-        return result;
-    }
 }

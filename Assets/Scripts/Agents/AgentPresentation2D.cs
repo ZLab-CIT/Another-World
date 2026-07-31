@@ -161,28 +161,46 @@ public class AgentPresentation2D : MonoBehaviour
 
     public void ShowSpeech(string speakerName, string content, Color speakerColor)
     {
-        if (!thoughtBubblesEnabled)
-            return;
+        AgentThoughtBubble bubble = EnsureSpeechBubble();
+        if (bubble != null)
+            bubble.ShowDialogue(speakerName, content, speakerColor);
+    }
 
-        if (speechBubble == null)
-        {
-            if (thoughtBubblePrefab == null)
-            {
-                Debug.LogWarning($"{name}: no bubble prefab is assigned.", this);
-                return;
-            }
+    public void ShowPhoneStatus(string speakerName, bool incoming, Color speakerColor)
+    {
+        AgentThoughtBubble bubble = EnsureSpeechBubble();
+        if (bubble != null)
+            bubble.ShowPhoneStatus(speakerName, incoming, speakerColor);
+    }
 
-            speechBubble = Instantiate(thoughtBubblePrefab, transform);
-            speechBubble.name = "SpeechBubble";
-        }
-
-        speechBubble.ShowDialogue(speakerName, content, speakerColor);
+    public void ShowPhoneSpeech(string speakerName, string content, Color speakerColor)
+    {
+        AgentThoughtBubble bubble = EnsureSpeechBubble();
+        if (bubble != null)
+            bubble.ShowPhoneDialogue(speakerName, content, speakerColor);
     }
 
     public void HideSpeech()
     {
         if (speechBubble != null)
             speechBubble.Hide();
+    }
+
+    private AgentThoughtBubble EnsureSpeechBubble()
+    {
+        if (!thoughtBubblesEnabled)
+            return null;
+        if (speechBubble != null)
+            return speechBubble;
+        if (thoughtBubblePrefab == null)
+        {
+            Debug.LogWarning($"{name}: no bubble prefab is assigned.", this);
+            return null;
+        }
+
+        speechBubble = Instantiate(thoughtBubblePrefab, transform);
+        speechBubble.name = "SpeechBubble";
+        return speechBubble;
     }
 
     public void AttachItemToHand(SceneItem item, Vector3 localOffset = default, Vector3 localScale = default, Quaternion localRot = default, float holdDuration = 0f)

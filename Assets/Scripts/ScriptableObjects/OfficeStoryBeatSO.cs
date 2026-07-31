@@ -28,9 +28,12 @@ public class OfficeStoryBeatSO : ScriptableObject
     [Tooltip("Public stories receive an announcement; private gossip remains visible only through character behavior.")]
     public bool publicAnnouncement;
 
-    [Header("Optional Follow-Through")]
-    [Tooltip("When greater than zero, the same characters later gather at a social point.")]
-    [Min(0f)] public float followUpDelaySeconds;
-    [Tooltip("Memory recorded when the follow-up actually begins.")]
-    [TextArea(1, 3)] public string followUpMemory;
+    [Header("Optional Physical Consequence")]
+    [Tooltip("Queues a real scene action when this story starts. Leave disabled for dialogue-only stories.")]
+    public bool requiresAction;
+    public OfficeActionType requiredAction = OfficeActionType.Custom;
+    [Tooltip("Optional preferred agent id. When unavailable, the selected story speaker acts.")]
+    public string preferredActorAgentId;
+    [Min(2f)] public float actionDurationSeconds = 5f;
+
 }

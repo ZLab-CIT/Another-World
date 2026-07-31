@@ -1,7 +1,5 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using UnityEngine;
 
 public class OfficeEventDirector : MonoBehaviour
@@ -11,6 +9,7 @@ public class OfficeEventDirector : MonoBehaviour
         public OfficeEpisodeBeat beat;
         public bool actionsQueued;
         public bool thoughtHandled;
+        public bool conversationRequested;
         public bool groupGathering;
         public AIWorkerAgent thoughtOwner;
         public float notBefore;
@@ -18,70 +17,48 @@ public class OfficeEventDirector : MonoBehaviour
         public readonly List<string> actionSequenceIds = new();
     }
 
-    private sealed class PendingStoryFollowUp
-    {
-        public OfficeStoryBeatSO story;
-        public AIWorkerAgent speaker;
-        public AIWorkerAgent target;
-        public PersistedStoryArcState arc;
-        public string generatedMemory;
-        public bool inFlight;
-        public float executeAt;
-        public float expiresAt;
-    }
-
     public static OfficeEventDirector Instance { get; private set; }
 
     [SerializeField, Min(10f)] private float firstCheckDelaySeconds = 8f;
     [SerializeField, Min(20f)] private float checkIntervalSeconds = 45f;
-    [SerializeField, Range(1, 5)] private int maxGuests = 4;
     [SerializeField, Range(0f, 1f)] private float giftChance = 0.35f;
     [SerializeField, Range(0f, 1f)] private float hatGiftChance = 0.2f;
     [SerializeField] private HatCatalogSO hatCatalog;
 
     [Header("Remote Episode Director")]
-    [SerializeField] private bool enableEpisodeDirector = true;
-    [SerializeField, Range(6, 10)] private int episodePackSize = 8;
-    [SerializeField, Range(1, 4)] private int episodeRefillThreshold = 3;
-    [SerializeField, Min(2f)] private float firstEpisodeDelaySeconds = 10f;
-    [SerializeField, Min(20f)] private float minimumEpisodeIntervalSeconds = 30f;
-    [SerializeField, Min(20f)] private float maximumEpisodeIntervalSeconds = 50f;
-    [SerializeField, Min(20f)] private float episodeExecutionTimeoutSeconds = 60f;
+    [SerializeField, Range(6, 10)] private int episodePackSize = 10;
+    [SerializeField, Range(1, 4)] private int episodeRefillThreshold = 4;
+    [SerializeField, Min(2f)] private float firstEpisodeDelaySeconds = 6f;
+    [SerializeField, Min(20f)] private float minimumEpisodeIntervalSeconds = 24f;
+    [SerializeField, Min(20f)] private float maximumEpisodeIntervalSeconds = 38f;
+    [SerializeField, Min(20f)] private float episodeExecutionTimeoutSeconds = 75f;
     [SerializeField, Min(5f)] private float failedRefillRetrySeconds = 30f;
 
-    [Header("Ambient Office Stories")]
-    [SerializeField] private bool enableAmbientStories = false;
-    [SerializeField, Min(5f)] private float firstAmbientStoryDelaySeconds = 20f;
-    [SerializeField, Min(20f)] private float minimumAmbientStoryIntervalSeconds = 180f;
-    [SerializeField, Min(20f)] private float maximumAmbientStoryIntervalSeconds = 300f;
-    [SerializeField] private bool announceAllAmbientStories = true;
+    [Header("Random Office Events")]
+    [SerializeField] private bool enableRandomOfficeEvents = true;
+    [SerializeField, Min(5f)] private float firstRandomEventDelaySeconds = 45f;
+    [SerializeField, Min(30f)] private float minimumRandomEventIntervalSeconds = 120f;
+    [SerializeField, Min(30f)] private float maximumRandomEventIntervalSeconds = 210f;
     [SerializeField, Min(0f)] private float vendingConversationCooldownSeconds = 300f;
 
     private readonly List<AIWorkerAgent> workers = new();
     private readonly HashSet<string> completedBirthdayEvents = new();
-    private readonly HashSet<string> attemptedBirthdayEvents = new();
-    private readonly HashSet<string> completedBirthdayPreparations = new();
     private readonly Queue<string> recentStoryIds = new();
-    private readonly List<PendingStoryFollowUp> pendingStoryFollowUps = new();
-    private readonly HashSet<string> queuedArcIds =
-        new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, float> nextVendingConversationTimes =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<OfficeEpisodeBeat> episodeReserve = new();
     private OfficeStoryBeatSO[] ambientStories;
     private float nextCheckTime;
-    private float nextAmbientStoryTime;
+    private float nextRandomEventTime;
     private float nextEpisodeTime;
     private float nextEpisodeRefillTime;
-    private bool ambientStoryInFlight;
     private bool episodeRefillInFlight;
     private bool episodeReserveRestored;
     private bool clearReserveAfterPendingEpisode;
     private bool loggedMissingEpisodeProvider;
+    private bool unresolvedStoryRecoveryChecked;
     private int consecutiveEpisodeRefillFailures;
     private PendingEpisodeExecution pendingEpisode;
-
-    public bool ManagesLLMScenes => enableEpisodeDirector;
 
     private void Awake()
     {
@@ -96,7 +73,7 @@ public class OfficeEventDirector : MonoBehaviour
             hatCatalog = Resources.Load<HatCatalogSO>("VendingEvents/HatCatalog");
         ambientStories = Resources.LoadAll<OfficeStoryBeatSO>("OfficeStories");
         nextCheckTime = Time.time + firstCheckDelaySeconds;
-        nextAmbientStoryTime = Time.time + firstAmbientStoryDelaySeconds;
+        nextRandomEventTime = Time.time + firstRandomEventDelaySeconds;
         nextEpisodeTime = Time.time + firstEpisodeDelaySeconds;
         nextEpisodeRefillTime = Time.time + 1f;
     }
@@ -113,8 +90,6 @@ public class OfficeEventDirector : MonoBehaviour
     {
         if (worker != null && !workers.Contains(worker))
             workers.Add(worker);
-        if (!enableEpisodeDirector)
-            RestorePersistedStoryArcs();
         RestoreEpisodeReserve();
     }
 
@@ -123,29 +98,7 @@ public class OfficeEventDirector : MonoBehaviour
         workers.Remove(worker);
     }
 
-    public void NotifyBirthdayPreparationCompleted(AIWorkerAgent creator, Vector2 location,
-        string description)
-    {
-        if (creator == null || !IsBirthdayPreparation(description))
-            return;
-
-        AIWorkerAgent birthdayWorker = FindBirthdayWorker(false);
-        if (birthdayWorker == null || birthdayWorker == creator)
-            return;
-
-        string key = DateTime.Today.ToString("yyyy-MM-dd") + ":" + creator.AgentId + ":"
-            + (description ?? "").Trim().ToLowerInvariant();
-        if (!completedBirthdayPreparations.Add(key))
-            return;
-
-        string worldEvent = creator.DisplayName + " finished preparing a birthday surprise for "
-            + birthdayWorker.DisplayName + ".";
-        Debug.Log("[Birthday preparation completed] " + worldEvent, creator);
-        LLMBrainService.Instance?.RememberWorldEvent(worldEvent);
-        birthdayWorker.ReceivePreparedBirthdaySurprise(creator, location, description);
-    }
-
-    public async void NotifyVendingEvent(VendingEventSO evt, List<AIWorkerAgent> targets)
+    public void NotifyVendingEvent(VendingEventSO evt, List<AIWorkerAgent> targets)
     {
         if (evt == null)
             return;
@@ -156,11 +109,9 @@ public class OfficeEventDirector : MonoBehaviour
         if (reactor == null)
             return;
 
-        string immediateReaction = enableEpisodeDirector
-            ? !string.IsNullOrWhiteSpace(evt.characterReaction)
-                ? evt.characterReaction.Trim()
-                : evt.description
-            : BuildVendingReaction(evt);
+        string immediateReaction = !string.IsNullOrWhiteSpace(evt.characterReaction)
+            ? evt.characterReaction.Trim()
+            : evt.description;
         reactor.ReactToWorldEvent(immediateReaction);
         string eventKey = !string.IsNullOrWhiteSpace(evt.eventId)
             ? evt.eventId : evt.displayName;
@@ -172,50 +123,15 @@ public class OfficeEventDirector : MonoBehaviour
             nextVendingConversationTimes[eventKey] =
                 Time.unscaledTime + vendingConversationCooldownSeconds;
 
-        if (enableEpisodeDirector)
-        {
-            string physicalEvent = "A physical vending purchase added "
-                + evt.displayName + " to the office: " + evt.description;
-            LLMBrainService.Instance?.RememberWorldEvent(physicalEvent);
-            PrioritizeFreshWorldContext();
-            return;
-        }
-
-        AIWorkerAgent partner = FindStoryPartner(reactor, targets);
-        if (partner == null)
-            partner = FindStoryPartner(reactor, workers);
-        if (partner != null)
-        {
-            string topic = evt.displayName + ": " + evt.description;
-            PreparedStoryConversation generated = null;
-            LLMBrainService brain = LLMBrainService.Instance;
-            if (brain != null
-                && reactor.TryGetComponent(out AgentConversationController reactorConversation)
-                && partner.TryGetComponent(out AgentConversationController partnerConversation))
-            {
-                generated = await brain.GenerateStoryConversationAsync(
-                    reactorConversation.BuildParticipantContext(),
-                    partnerConversation.BuildParticipantContext(),
-                    evt.displayName, topic, 0, "A physical purchase entered the world.");
-            }
-            if (generated == null)
-                return;
-            string opening = generated.openingLine;
-            reactor.RequestApproachConversation(partner,
-                !string.IsNullOrWhiteSpace(generated.topic)
-                    ? generated.topic : topic,
-                opening, highPriority: true, preparedScript: generated.continuation);
-            if (!string.IsNullOrWhiteSpace(generated.memory))
-                brain?.RememberWorldEvent(generated.memory);
-        }
+        string physicalEvent = "A physical vending purchase added "
+            + evt.displayName + " to the office: " + evt.description;
+        LLMBrainService.Instance?.RememberWorldEvent(physicalEvent);
+        PrioritizeFreshWorldContext();
     }
 
     private void Update()
     {
-        if (enableEpisodeDirector)
-            TickEpisodeDirector();
-        else
-            TryStartDueFollowUps();
+        TickEpisodeDirector();
 
         if (Time.time >= nextCheckTime)
         {
@@ -223,12 +139,6 @@ public class OfficeEventDirector : MonoBehaviour
             TryStartBirthdayEvent();
         }
 
-        if (!enableEpisodeDirector && enableAmbientStories
-            && Time.time >= nextAmbientStoryTime)
-        {
-            nextAmbientStoryTime = float.MaxValue;
-            BeginAmbientStory();
-        }
     }
 
     private void RestoreEpisodeReserve()
@@ -240,7 +150,7 @@ public class OfficeEventDirector : MonoBehaviour
         if (brain == null)
             return;
         foreach (OfficeEpisodeBeat beat in brain.RestoreEpisodeReserve())
-            if (beat != null)
+            if (beat != null && beat.schemaVersion >= 5)
                 episodeReserve.Enqueue(beat);
         if (episodeReserve.Count > 0)
             Debug.Log("[Episode director] restored " + episodeReserve.Count
@@ -254,6 +164,16 @@ public class OfficeEventDirector : MonoBehaviour
             return;
 
         LLMBrainService brain = LLMBrainService.Instance;
+        if (!unresolvedStoryRecoveryChecked && brain != null)
+        {
+            unresolvedStoryRecoveryChecked = true;
+            RecoverUnresolvedStoryActions();
+        }
+        if (enableRandomOfficeEvents && Time.time >= nextRandomEventTime
+            && pendingEpisode == null && !episodeRefillInFlight
+            && episodeReserve.Count <= Mathf.Clamp(episodeRefillThreshold, 1, 4))
+            TryInjectRandomOfficeEvent();
+
         if (!episodeRefillInFlight && Time.time >= nextEpisodeRefillTime
             && episodeReserve.Count < Mathf.Clamp(episodeRefillThreshold, 1, 4))
         {
@@ -284,7 +204,7 @@ public class OfficeEventDirector : MonoBehaviour
             {
                 beat = episodeReserve.Peek(),
                 expiresAt = Time.time + Mathf.Clamp(
-                    episodeExecutionTimeoutSeconds, 20f, 60f)
+                    episodeExecutionTimeoutSeconds, 30f, 90f)
             };
         }
 
@@ -310,7 +230,7 @@ public class OfficeEventDirector : MonoBehaviour
             List<AIWorkerAgent> snapshot =
                 workers.FindAll(worker => worker != null);
             int requested = consecutiveEpisodeRefillFailures > 0
-                ? 6 : Mathf.Clamp(episodePackSize, 6, 10);
+                ? 5 : Mathf.Clamp(episodePackSize, 6, 8);
             OfficeEpisodePack pack = LLMBrainService.Instance != null
                 ? await LLMBrainService.Instance.GenerateEpisodePackAsync(
                     snapshot, requested)
@@ -322,7 +242,7 @@ public class OfficeEventDirector : MonoBehaviour
             {
                 consecutiveEpisodeRefillFailures++;
                 nextEpisodeRefillTime = Time.time
-                    + Mathf.Max(5f, failedRefillRetrySeconds);
+                    + GetRefillRetryDelay();
                 return;
             }
 
@@ -340,7 +260,7 @@ public class OfficeEventDirector : MonoBehaviour
         {
             consecutiveEpisodeRefillFailures++;
             nextEpisodeRefillTime = Time.time
-                + Mathf.Max(5f, failedRefillRetrySeconds);
+                + GetRefillRetryDelay();
             Debug.LogWarning("[Episode director] refill failed: "
                 + exception.Message, this);
         }
@@ -349,6 +269,13 @@ public class OfficeEventDirector : MonoBehaviour
             if (this != null)
                 episodeRefillInFlight = false;
         }
+    }
+
+    private float GetRefillRetryDelay()
+    {
+        float baseDelay = Mathf.Max(10f, failedRefillRetrySeconds);
+        int exponent = Mathf.Clamp(consecutiveEpisodeRefillFailures - 1, 0, 4);
+        return Mathf.Min(300f, baseDelay * Mathf.Pow(2f, exponent));
     }
 
     private void TryExecutePendingEpisode()
@@ -462,6 +389,10 @@ public class OfficeEventDirector : MonoBehaviour
             step++;
             stepsByAgent[worker.AgentId] = step;
             OfficeDestinationMode mode = ResolveEpisodeDestination(actionType);
+            AIWorkerAgent target = FindWorker(action.targetAgentId);
+            bool deliverItem = target != null && target != worker
+                && (actionType == OfficeActionType.VendingMachine
+                    || actionType == OfficeActionType.CoffeeMachine);
             OfficeActivityPlan plan = new()
             {
                 actionType = actionType,
@@ -470,7 +401,7 @@ public class OfficeEventDirector : MonoBehaviour
                 sequenceId = sequenceId,
                 sequenceStep = step,
                 objective = execution.beat.topic,
-                targetAgent = FindWorker(action.targetAgentId)?.DisplayName ?? "",
+                targetAgent = target?.DisplayName ?? "",
                 durationSeconds = Mathf.Clamp(action.durationSeconds, 2f, 15f),
                 reason = action.reason,
                 thought = action.thought,
@@ -481,10 +412,29 @@ public class OfficeEventDirector : MonoBehaviour
             };
             if (!worker.QueueEpisodeActivity(plan, interruptRoutine))
                 continue;
+            queued++;
+            if (deliverItem)
+            {
+                step++;
+                stepsByAgent[worker.AgentId] = step;
+                worker.QueueEpisodeActivity(new OfficeActivityPlan
+                {
+                    actionType = OfficeActionType.ApproachColleague,
+                    destinationMode = OfficeDestinationMode.FollowAgent,
+                    sequenceId = sequenceId,
+                    sequenceStep = step,
+                    objective = execution.beat.topic,
+                    targetAgent = target.DisplayName,
+                    durationSeconds = 3f,
+                    reason = action.reason,
+                    giveHeldItemToTarget = true,
+                    isDirected = true,
+                    remainingStartAttempts = 8
+                }, false);
+            }
             if (trackSequences
                 && !execution.actionSequenceIds.Contains(sequenceId))
                 execution.actionSequenceIds.Add(sequenceId);
-            queued++;
         }
         return queued;
     }
@@ -539,9 +489,9 @@ public class OfficeEventDirector : MonoBehaviour
 
     private void TryStartEpisodeConversation(OfficeEpisodeBeat beat)
     {
-        if (AgentConversationController.IsAnyConversationActive)
+        if (!AgentConversationController.HasConversationCapacity)
             return;
-        if (pendingEpisode != null && pendingEpisode.groupGathering)
+        if (pendingEpisode != null && pendingEpisode.conversationRequested)
             return;
         if (beat?.participantIds == null || beat.participantIds.Length < 2
             || beat.participantIds.Length > 4
@@ -577,14 +527,25 @@ public class OfficeEventDirector : MonoBehaviour
         if (participants.Count == 2)
         {
             pendingEpisode.expiresAt = Mathf.Min(
-                pendingEpisode.expiresAt, Time.time + 30f);
+                pendingEpisode.expiresAt, Time.time + 40f);
             AIWorkerAgent target = participants[0] == initiator
                 ? participants[1] : participants[0];
+            PendingEpisodeExecution execution = pendingEpisode;
+            execution.conversationRequested = true;
             if (!initiator.RequestApproachConversation(
                     target, beat.topic, script.openingLine,
-                    highPriority: true, preparedScript: script))
+                    highPriority: true, preparedScript: script,
+                    onConversationStarted: () =>
+                    {
+                        if (pendingEpisode != execution)
+                            return;
+                        QueueEpisodeActions(execution, false, "after", false);
+                        CompletePendingEpisode();
+                    }))
+            {
+                execution.conversationRequested = false;
                 return;
-            QueueEpisodeActions(pendingEpisode, false, "after", false);
+            }
         }
         else
         {
@@ -600,6 +561,7 @@ public class OfficeEventDirector : MonoBehaviour
                 pendingEpisode.expiresAt, Time.time + 40f);
             PendingEpisodeExecution execution = pendingEpisode;
             execution.expiresAt = expiresAt;
+            execution.conversationRequested = true;
             ConversationIntent intent = new()
             {
                 initiatorAgentId = initiator.AgentId,
@@ -609,7 +571,6 @@ public class OfficeEventDirector : MonoBehaviour
                     participant => participant.DisplayName).ToArray(),
                 topic = beat.topic,
                 openingLine = script.openingLine,
-                generatedByModel = true,
                 preparedScript = script,
                 actionType = action.actionType,
                 createdAt = Time.time,
@@ -625,23 +586,21 @@ public class OfficeEventDirector : MonoBehaviour
             execution.groupGathering = true;
             if (!initiator.RequestEventConversation(action, intent))
             {
+                execution.conversationRequested = false;
                 execution.groupGathering = false;
                 return;
             }
-            if (!AgentConversationController.IsAnyConversationActive)
-                foreach (AIWorkerAgent participant in participants)
-                    if (participant != initiator)
-                        participant.ReceiveSocialInvitation(
-                            action, initiator.DisplayName, expiresAt,
-                            highPriority: true);
+            foreach (AIWorkerAgent participant in participants)
+                if (participant != initiator)
+                    participant.ReceiveSocialInvitation(
+                        action, initiator.DisplayName, expiresAt,
+                        highPriority: true);
             Debug.Log("[Episode gathering] " + beat.topic + ": "
                 + string.Join(", ", participants.ConvertAll(
                     participant => participant.DisplayName))
                 + " at " + action.actionType, this);
             return;
         }
-
-        CompletePendingEpisode();
     }
 
     private static OfficeActionPoint FindSharedSocialPoint(
@@ -777,8 +736,6 @@ public class OfficeEventDirector : MonoBehaviour
 
     private void TryStartEpisodePhoneCall(OfficeEpisodeBeat beat)
     {
-        if (AgentConversationController.IsAnyConversationActive)
-            return;
         if (pendingEpisode != null)
             pendingEpisode.expiresAt = Mathf.Min(
                 pendingEpisode.expiresAt, Time.time + 30f);
@@ -920,162 +877,6 @@ public class OfficeEventDirector : MonoBehaviour
         PersistEpisodeReserve();
     }
 
-    private async void BeginAmbientStory()
-    {
-        if (ambientStoryInFlight)
-            return;
-        ambientStoryInFlight = true;
-        bool started = false;
-        try
-        {
-            started = await TryStartAmbientStoryAsync();
-        }
-        catch (Exception exception)
-        {
-            Debug.LogWarning("Ambient story failed: " + exception.Message, this);
-        }
-        finally
-        {
-            ambientStoryInFlight = false;
-            ScheduleNextAmbientStory(started);
-        }
-    }
-
-    private async Task<bool> TryStartAmbientStoryAsync()
-    {
-        if (ambientStories == null || ambientStories.Length == 0)
-            return false;
-
-        List<AIWorkerAgent> available = new();
-        foreach (AIWorkerAgent worker in workers)
-            if (worker != null && worker.CanJoinStoryBeat)
-                available.Add(worker);
-        if (available.Count < 2)
-            return false;
-
-        OfficeStoryBeatSO story = PickStory();
-        if (story == null)
-            return false;
-
-        AIWorkerAgent speaker = PickStorySpeaker(available, story.topic);
-        available.Remove(speaker);
-        AIWorkerAgent target = available[UnityEngine.Random.Range(0, available.Count)];
-        string topic = Expand(story.topic, speaker, target);
-        string establishedFact = Expand(story.memory, speaker, target);
-        PreparedStoryConversation generated = await GenerateStoryScene(
-            speaker, target, story, establishedFact, 0, "");
-        if (generated == null)
-        {
-            speaker.ReactToWorldEvent(topic);
-            target.ReactToWorldEvent(topic);
-            RememberStory(story, speaker, target, establishedFact);
-            RememberRecentStory(story.storyId);
-            ShowAmbientAnnouncement(story, establishedFact);
-            return true;
-        }
-        string opening = generated.openingLine;
-        string resolvedTopic = !string.IsNullOrWhiteSpace(generated.topic)
-            ? generated.topic : topic;
-        bool conversationStarted = speaker.RequestApproachConversation(
-            target, resolvedTopic, opening,
-            preparedScript: generated?.continuation);
-
-        UpdateStoryVisual(story, 0);
-        string memory = !string.IsNullOrWhiteSpace(generated.memory)
-            ? generated.memory : establishedFact;
-        if (!conversationStarted)
-        {
-            speaker.ReactToWorldEvent(resolvedTopic);
-            target.ReactToWorldEvent(resolvedTopic);
-        }
-        RememberStory(story, speaker, target, memory);
-        ScheduleFollowUp(story, speaker, target, memory);
-        RememberRecentStory(story.storyId);
-        ShowAmbientAnnouncement(story, memory);
-        return true;
-    }
-
-    private void ShowAmbientAnnouncement(OfficeStoryBeatSO story, string memory)
-    {
-        if (story == null
-            || (!announceAllAmbientStories && !story.publicAnnouncement))
-            return;
-        VendingEventDispatcher.Instance?.ShowWorldAnnouncement(
-            story.title, memory, null, 3.5f);
-    }
-
-    private void ScheduleFollowUp(OfficeStoryBeatSO story, AIWorkerAgent speaker,
-        AIWorkerAgent target, string establishedFact)
-    {
-        if (story == null)
-            return;
-
-        float delay = story.followUpDelaySeconds > 0f
-            ? story.followUpDelaySeconds : UnityEngine.Random.Range(75f, 130f);
-        LLMBrainService brain = LLMBrainService.Instance;
-        PersistedStoryArcState arc = new()
-        {
-            arcId = Guid.NewGuid().ToString("N"),
-            storyId = story.storyId,
-            speakerAgentId = speaker.AgentId,
-            targetAgentId = target.AgentId,
-            establishedFact = establishedFact,
-            stage = 1,
-            nextStageWorldTime = (brain?.WorldUnixSeconds ?? 0d)
-                + (brain?.WorldSecondsFromRealSeconds(delay) ?? delay),
-            status = "active"
-        };
-        brain?.UpsertStoryArc(arc);
-        queuedArcIds.Add(arc.arcId);
-        float executeAt = Time.time + Mathf.Max(10f, delay);
-        pendingStoryFollowUps.Add(new PendingStoryFollowUp
-        {
-            story = story,
-            speaker = speaker,
-            target = target,
-            arc = arc,
-            executeAt = executeAt,
-            expiresAt = executeAt + 180f
-        });
-    }
-
-    private void RestorePersistedStoryArcs()
-    {
-        LLMBrainService brain = LLMBrainService.Instance;
-        if (brain == null || ambientStories == null)
-            return;
-
-        foreach (PersistedStoryArcState arc in brain.StoryArcs)
-        {
-            if (arc == null || !string.Equals(arc.status, "active",
-                    StringComparison.OrdinalIgnoreCase)
-                || !queuedArcIds.Add(arc.arcId))
-                continue;
-
-            AIWorkerAgent speaker = FindWorker(arc.speakerAgentId);
-            AIWorkerAgent target = FindWorker(arc.targetAgentId);
-            OfficeStoryBeatSO story = Array.Find(ambientStories, candidate =>
-                candidate != null && string.Equals(candidate.storyId, arc.storyId,
-                    StringComparison.OrdinalIgnoreCase));
-            if (speaker == null || target == null || story == null)
-            {
-                queuedArcIds.Remove(arc.arcId);
-                continue;
-            }
-
-            float delay = Mathf.Max(2f, brain.RealSecondsUntil(arc.nextStageWorldTime));
-            pendingStoryFollowUps.Add(new PendingStoryFollowUp
-            {
-                story = story,
-                speaker = speaker,
-                target = target,
-                arc = arc,
-                executeAt = Time.time + delay,
-                expiresAt = Time.time + delay + 240f
-            });
-        }
-    }
-
     private AIWorkerAgent FindWorker(string agentId)
     {
         foreach (AIWorkerAgent worker in workers)
@@ -1085,180 +886,227 @@ public class OfficeEventDirector : MonoBehaviour
         return null;
     }
 
-    private void TryStartDueFollowUps()
+    private void TryInjectRandomOfficeEvent()
     {
-        for (int i = pendingStoryFollowUps.Count - 1; i >= 0; i--)
+        if (ambientStories == null || ambientStories.Length == 0)
         {
-            PendingStoryFollowUp pending = pendingStoryFollowUps[i];
-            if (pending == null || pending.story == null || pending.speaker == null
-                || pending.target == null || Time.time > pending.expiresAt)
-            {
-                if (pending?.arc != null)
-                {
-                    pending.arc.status = "expired";
-                    LLMBrainService.Instance?.UpsertStoryArc(pending.arc);
-                    queuedArcIds.Remove(pending.arc.arcId);
-                }
-                pendingStoryFollowUps.RemoveAt(i);
-                continue;
-            }
-            if (Time.time < pending.executeAt)
-                continue;
-            if (pending.inFlight)
-                continue;
-            if (!pending.speaker.CanJoinStoryBeat || !pending.target.CanJoinStoryBeat)
-            {
-                pending.executeAt = Time.time + 15f;
-                continue;
-            }
-
-            pending.inFlight = true;
-            BeginStoryFollowUp(pending);
-        }
-    }
-
-    private async void BeginStoryFollowUp(PendingStoryFollowUp pending)
-    {
-        if (pending == null || pending.story == null)
-            return;
-
-        PreparedStoryConversation generated = await GenerateStoryScene(
-            pending.speaker, pending.target, pending.story,
-            pending.arc?.establishedFact ?? pending.story.topic,
-            pending.arc?.stage ?? 1, pending.arc?.establishedFact);
-        if (pending.speaker == null || pending.target == null)
-            return;
-        if (generated == null)
-        {
-            pending.inFlight = false;
-            pending.executeAt = Time.time + UnityEngine.Random.Range(90f, 150f);
+            ScheduleNextRandomEvent(false);
             return;
         }
 
-        OfficeActionPoint action = FindEventSpot(pending.target, pending.story);
-        if (action == null)
+        List<AIWorkerAgent> available =
+            workers.FindAll(worker => worker != null && worker.CanJoinStoryBeat);
+        if (available.Count < 2)
         {
-            pending.inFlight = false;
-            pending.executeAt = Time.time + 15f;
+            ScheduleNextRandomEvent(false);
             return;
         }
 
-        string opening = generated.openingLine;
-        pending.generatedMemory = generated?.memory;
-        float intentExpiry = Time.time + 50f;
-        ConversationIntent intent = new()
+        OfficeStoryBeatSO story = PickStory();
+        if (story == null)
         {
-            initiatorAgentId = pending.speaker.AgentId,
-            initiatorName = pending.speaker.DisplayName,
-            intendedPartnerName = pending.target.DisplayName,
-            topic = !string.IsNullOrWhiteSpace(generated.topic)
-                ? generated.topic : pending.story.topic,
-            openingLine = opening,
-            generatedByModel = true,
-            preparedScript = generated.continuation,
-            actionType = action.actionType,
-            createdAt = Time.time,
-            expiresAt = intentExpiry
-        };
-        intent.onOpeningSpoken = () => CompleteStoryFollowUp(pending);
-
-        if (!pending.speaker.RequestEventConversation(action, intent))
-        {
-            pending.inFlight = false;
-            pending.executeAt = Time.time + 15f;
+            ScheduleNextRandomEvent(false);
             return;
         }
 
-        pending.target.ReceiveSocialInvitation(
-            action, pending.speaker.DisplayName, intentExpiry);
-        UpdateStoryVisual(pending.story, 1);
-        pendingStoryFollowUps.Remove(pending);
-    }
-
-    private void CompleteStoryFollowUp(PendingStoryFollowUp pending)
-    {
-        if (pending?.story == null || pending.speaker == null || pending.target == null)
-            return;
-
-        string memory = pending.generatedMemory;
+        AIWorkerAgent preferredActor = FindWorker(story.preferredActorAgentId);
+        AIWorkerAgent speaker = preferredActor != null
+            && available.Contains(preferredActor)
+            ? preferredActor
+            : PickStorySpeaker(available, story.topic);
+        available.Remove(speaker);
+        AIWorkerAgent target = available[
+            UnityEngine.Random.Range(0, available.Count)];
+        string memory = Expand(story.memory, speaker, target);
         if (string.IsNullOrWhiteSpace(memory))
-            memory = Expand(
-                pending.story.followUpMemory, pending.speaker, pending.target);
-        if (string.IsNullOrWhiteSpace(memory))
-            memory = pending.speaker.DisplayName + " and " + pending.target.DisplayName
-                + " followed through on their plan.";
+            memory = Expand(story.topic, speaker, target);
+        string worldEvent = story.title + ": " + memory;
 
         LLMBrainService brain = LLMBrainService.Instance;
-        brain?.Remember(pending.speaker.AgentId, memory);
-        brain?.Remember(pending.target.AgentId, memory);
-        if (pending.story.kind != OfficeStoryKind.Gossip)
-            brain?.RememberWorldEvent(memory);
-        if (pending.story.publicAnnouncement)
-        {
-            string stageLabel = pending.arc != null && pending.arc.stage >= 2
-                ? pending.story.title + " Resolved"
-                : pending.story.title + " Developed";
+        brain?.Remember(speaker.AgentId, memory);
+        brain?.Remember(target.AgentId, memory);
+        brain?.RememberWorldEvent(worldEvent);
+        if (story.requiresAction)
+            brain?.RecordOfficeStoryStarted(story.storyId);
+        UpdateStoryVisual(story, 0);
+        QueueRequiredStoryAction(story, speaker);
+        if (story.publicAnnouncement)
             VendingEventDispatcher.Instance?.ShowWorldAnnouncement(
-                stageLabel, memory, null, 2.5f);
-        }
+                story.title, memory, null, 3.5f);
 
-        if (pending.arc == null)
+        RememberRecentStory(story.storyId);
+        ScheduleNextRandomEvent(true);
+        PrioritizeFreshWorldContext();
+        Debug.Log("[Office event] " + worldEvent, this);
+    }
+
+    private void QueueRequiredStoryAction(
+        OfficeStoryBeatSO story, AIWorkerAgent fallbackActor)
+    {
+        if (story == null || !story.requiresAction
+            || story.requiredAction == OfficeActionType.Custom)
             return;
-        if (pending.arc.stage >= 2)
+
+        AIWorkerAgent actor = FindWorker(story.preferredActorAgentId)
+            ?? fallbackActor;
+        if (actor == null)
+            return;
+
+        OfficeActivityPlan plan = new()
         {
-            UpdateStoryVisual(pending.story, 2);
-            LLMBrainService.Instance?.CompleteStoryArc(pending.arc.arcId);
-            queuedArcIds.Remove(pending.arc.arcId);
+            actionType = story.requiredAction,
+            destinationMode = ResolveEpisodeDestination(story.requiredAction),
+            sequenceId = "story:" + story.storyId + ":" + Time.frameCount,
+            sequenceStep = 1,
+            objective = story.topic,
+            durationSeconds = Mathf.Clamp(
+                story.actionDurationSeconds, 2f, 15f),
+            reason = story.topic,
+            isDirected = true,
+            remainingStartAttempts = 12
+        };
+        if (actor.QueueEpisodeActivity(plan, true))
+            Debug.Log("[Office event action] " + actor.DisplayName
+                + " -> " + story.requiredAction, this);
+    }
+
+    private void RecoverUnresolvedStoryActions()
+    {
+        if (ambientStories == null)
+            return;
+        foreach (OfficeStoryBeatSO story in ambientStories)
+        {
+            if (story == null || !story.requiresAction
+                || !HasUnresolvedStoryOccurrence(story))
+                continue;
+            LLMBrainService brain = LLMBrainService.Instance;
+            if (brain != null && !brain.HasOfficeStoryState(story.storyId))
+                brain.RecordOfficeStoryStarted(story.storyId);
+            UpdateStoryVisual(story, 0);
+            QueueRequiredStoryAction(story, FirstAvailable(workers));
+        }
+    }
+
+    public void NotifyStoryActionCompleted(
+        OfficeActionType actionType, AIWorkerAgent actor)
+    {
+        LLMBrainService brain = LLMBrainService.Instance;
+        if (brain == null || ambientStories == null)
+            return;
+        foreach (OfficeStoryBeatSO story in ambientStories)
+        {
+            if (story == null || !story.requiresAction
+                || story.requiredAction != actionType
+                || !HasUnresolvedStoryOccurrence(story))
+                continue;
+            brain.RecordOfficeStoryResolved(story.storyId);
+            brain.RememberWorldEvent(StoryResolutionMarker(story)
+                + " by " + (actor != null ? actor.DisplayName : "an agent"));
+            Debug.Log("[Office event resolved] " + story.title
+                + " by " + (actor != null ? actor.DisplayName : "an agent"), this);
             return;
         }
+    }
 
-        pending.arc.stage++;
-        pending.arc.establishedFact = memory;
-        pending.arc.nextStageWorldTime =
-            (LLMBrainService.Instance?.WorldUnixSeconds ?? 0d)
-            + (LLMBrainService.Instance?.WorldSecondsFromRealSeconds(90f) ?? 90d);
-        LLMBrainService.Instance?.UpsertStoryArc(pending.arc);
-        float executeAt = Time.time + 90f;
-        pendingStoryFollowUps.Add(new PendingStoryFollowUp
+    private static bool HasUnresolvedStoryOccurrence(OfficeStoryBeatSO story)
+    {
+        LLMBrainService brain = LLMBrainService.Instance;
+        if (brain == null || story == null)
+            return false;
+        if (brain.HasOfficeStoryState(story.storyId))
+            return brain.HasPendingOfficeStory(story.storyId);
+        int started = 0;
+        int resolved = 0;
+        string marker = StoryResolutionMarker(story);
+        foreach (string worldEvent in brain.WorldEvents)
         {
-            story = pending.story,
-            speaker = pending.speaker,
-            target = pending.target,
-            arc = pending.arc,
-            executeAt = executeAt,
-            expiresAt = executeAt + 240f
-        });
+            if (string.IsNullOrWhiteSpace(worldEvent))
+                continue;
+            if (worldEvent.StartsWith(story.title + ":",
+                    StringComparison.OrdinalIgnoreCase))
+                started++;
+            if (worldEvent.StartsWith(marker,
+                    StringComparison.OrdinalIgnoreCase))
+                resolved++;
+        }
+        if (HasStoryMemoryEvidence(brain, story))
+            started = Mathf.Max(started, 1);
+        return started > resolved;
+    }
+
+    private static bool HasStoryMemoryEvidence(
+        LLMBrainService brain, OfficeStoryBeatSO story)
+    {
+        string keyword = GetStoryMemoryKeyword(story?.title);
+        if (string.IsNullOrWhiteSpace(keyword))
+            return false;
+        foreach (AIWorkerAgent worker in Instance.workers)
+        {
+            AgentProfile profile = brain.GetProfile(worker?.AgentId);
+            if (profile == null)
+                continue;
+            foreach (string memory in profile.memory)
+                if (TextUtils.ContainsIgnoreCase(memory, keyword))
+                    return true;
+            foreach (SocialMemoryEntry social in profile.socialMemory)
+                if (social != null
+                    && TextUtils.ContainsIgnoreCase(social.subject, keyword))
+                    return true;
+        }
+        return false;
+    }
+
+    private static string GetStoryMemoryKeyword(string title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return "";
+        string[] ignored = { "office", "story", "mystery", "event", "the" };
+        string[] words = title.Split(
+            new[] { ' ', '-', '_', ':', '.', ',' },
+            StringSplitOptions.RemoveEmptyEntries);
+        foreach (string word in words)
+        {
+            string clean = word.Trim().ToLowerInvariant();
+            if (clean.Length >= 5 && Array.IndexOf(ignored, clean) < 0)
+                return clean;
+        }
+        return "";
+    }
+
+    private static string StoryResolutionMarker(OfficeStoryBeatSO story)
+    {
+        return "[Story resolved] " + story.storyId;
     }
 
     private OfficeStoryBeatSO PickStory()
     {
-        float total = 0f;
+        List<OfficeStoryBeatSO> candidates = new();
         foreach (OfficeStoryBeatSO story in ambientStories)
-            if (story != null && !WasRecentlyUsed(story.storyId))
-                total += Mathf.Max(0.01f, story.weight);
-
-        if (total <= 0f)
-        {
-            recentStoryIds.Clear();
+            if (story != null && !WasRecentlyUsed(story, true))
+                candidates.Add(story);
+        if (candidates.Count == 0)
+            foreach (OfficeStoryBeatSO story in ambientStories)
+                if (story != null && !WasRecentlyUsed(story, false))
+                    candidates.Add(story);
+        if (candidates.Count == 0)
             foreach (OfficeStoryBeatSO story in ambientStories)
                 if (story != null)
-                    total += Mathf.Max(0.01f, story.weight);
-        }
+                    candidates.Add(story);
+
+        float total = 0f;
+        foreach (OfficeStoryBeatSO story in candidates)
+            total += Mathf.Max(0.01f, story.weight);
         if (total <= 0f)
             return null;
 
         float roll = UnityEngine.Random.Range(0f, total);
-        OfficeStoryBeatSO fallback = null;
-        foreach (OfficeStoryBeatSO story in ambientStories)
+        foreach (OfficeStoryBeatSO story in candidates)
         {
-            if (story == null || WasRecentlyUsed(story.storyId))
-                continue;
-            fallback = story;
             roll -= Mathf.Max(0.01f, story.weight);
             if (roll <= 0f)
                 return story;
         }
-        return fallback;
+        return candidates[candidates.Count - 1];
     }
 
     private static AIWorkerAgent PickStorySpeaker(List<AIWorkerAgent> candidates, string topic)
@@ -1278,47 +1126,17 @@ public class OfficeEventDirector : MonoBehaviour
         return best;
     }
 
-    private async Task<PreparedStoryConversation> GenerateStoryScene(
-        AIWorkerAgent speaker, AIWorkerAgent target, OfficeStoryBeatSO story,
-        string establishedFact, int stage, string priorOutcome)
+    private void ScheduleNextRandomEvent(bool started)
     {
-        LLMBrainService brain = LLMBrainService.Instance;
-        if (brain == null || speaker == null || target == null
-            || !speaker.TryGetComponent(out AgentConversationController speakerConversation)
-            || !target.TryGetComponent(out AgentConversationController targetConversation))
-            return null;
-
-        return await brain.GenerateStoryConversationAsync(
-            speakerConversation.BuildParticipantContext(),
-            targetConversation.BuildParticipantContext(),
-            story != null ? story.title : "Office event",
-            establishedFact, stage, priorOutcome);
-    }
-
-    private void RememberStory(OfficeStoryBeatSO story, AIWorkerAgent speaker,
-        AIWorkerAgent target, string memory)
-    {
-        if (string.IsNullOrWhiteSpace(memory))
-            return;
-
-        LLMBrainService brain = LLMBrainService.Instance;
-        brain?.Remember(speaker.AgentId, memory);
-        brain?.Remember(target.AgentId, memory);
-        if (story.kind != OfficeStoryKind.Gossip)
-            brain?.RememberWorldEvent(memory);
-    }
-
-    private void ScheduleNextAmbientStory(bool storyStarted)
-    {
-        if (!storyStarted)
+        if (!started)
         {
-            nextAmbientStoryTime = Time.time + UnityEngine.Random.Range(90f, 150f);
+            nextRandomEventTime = Time.time + UnityEngine.Random.Range(30f, 60f);
             return;
         }
 
-        float minimum = Mathf.Max(20f, minimumAmbientStoryIntervalSeconds);
-        float maximum = Mathf.Max(minimum, maximumAmbientStoryIntervalSeconds);
-        nextAmbientStoryTime = Time.time + UnityEngine.Random.Range(minimum, maximum);
+        float minimum = Mathf.Max(30f, minimumRandomEventIntervalSeconds);
+        float maximum = Mathf.Max(minimum, maximumRandomEventIntervalSeconds);
+        nextRandomEventTime = Time.time + UnityEngine.Random.Range(minimum, maximum);
     }
 
     private void RememberRecentStory(string storyId)
@@ -1330,25 +1148,25 @@ public class OfficeEventDirector : MonoBehaviour
             recentStoryIds.Dequeue();
     }
 
-    private bool WasRecentlyUsed(string storyId)
+    private bool WasRecentlyUsed(OfficeStoryBeatSO story, bool includeWorldHistory)
     {
-        if (string.IsNullOrWhiteSpace(storyId))
+        if (story == null || string.IsNullOrWhiteSpace(story.storyId))
             return false;
         foreach (string recent in recentStoryIds)
-            if (string.Equals(recent, storyId, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(recent, story.storyId,
+                    StringComparison.OrdinalIgnoreCase))
+                return true;
+        if (!includeWorldHistory || string.IsNullOrWhiteSpace(story.title))
+            return false;
+        LLMBrainService brain = LLMBrainService.Instance;
+        if (brain == null)
+            return false;
+        foreach (string worldEvent in brain.WorldEvents)
+            if (!string.IsNullOrWhiteSpace(worldEvent)
+                && worldEvent.StartsWith(story.title + ":",
+                    StringComparison.OrdinalIgnoreCase))
                 return true;
         return false;
-    }
-
-    private AIWorkerAgent FindStoryPartner(AIWorkerAgent reactor,
-        IEnumerable<AIWorkerAgent> candidates)
-    {
-        if (candidates == null)
-            return null;
-        foreach (AIWorkerAgent candidate in candidates)
-            if (candidate != null && candidate != reactor && candidate.CanJoinStoryBeat)
-                return candidate;
-        return null;
     }
 
     private static AIWorkerAgent FirstAvailable(IEnumerable<AIWorkerAgent> candidates)
@@ -1378,26 +1196,6 @@ public class OfficeEventDirector : MonoBehaviour
             .Replace("{target}", target != null ? target.DisplayName : "a coworker");
     }
 
-    private static string SafeLower(string value, string fallback)
-    {
-        return string.IsNullOrWhiteSpace(value) ? fallback : value.Trim().ToLowerInvariant();
-    }
-
-    private static string BuildVendingReaction(VendingEventSO evt)
-    {
-        if (!string.IsNullOrWhiteSpace(evt.characterReaction))
-            return evt.characterReaction.Trim();
-
-        string text = (evt.displayName + " " + evt.description).ToLowerInvariant();
-        if (text.Contains("coffee") || text.Contains("caffeine") || text.Contains("drink"))
-            return "That energy boost arrived at exactly the right time.";
-        if (text.Contains("snack") || text.Contains("lunch") || text.Contains("food"))
-            return "A real purchase just changed our tiny office.";
-        if (evt is IVendingGachaEvent)
-            return "The office actually looks different now.";
-        return "Something from the vending machine changed our day.";
-    }
-
     private void TryStartBirthdayEvent()
     {
         AIWorkerAgent birthdayWorker = FindBirthdayWorker();
@@ -1405,96 +1203,27 @@ public class OfficeEventDirector : MonoBehaviour
             return;
 
         string eventKey = DateTime.Today.ToString("yyyy-MM-dd") + ":" + birthdayWorker.AgentId;
-        if (completedBirthdayEvents.Contains(eventKey) || attemptedBirthdayEvents.Contains(eventKey))
-            return;
-
-        if (enableEpisodeDirector)
-        {
-            string episodeBirthdayTitle = birthdayWorker.DisplayName + "'s Birthday";
-            string episodeBirthdayDescription = "Today is " + birthdayWorker.DisplayName
-                + "'s birthday. Their coworkers have noticed.";
-            completedBirthdayEvents.Add(eventKey);
-            LLMBrainService.Instance?.RememberWorldEvent(episodeBirthdayDescription);
-            VendingEventDispatcher.Instance?.ShowWorldAnnouncement(
-                episodeBirthdayTitle, episodeBirthdayDescription, null, 3.5f);
-            ApplyBirthdayGift(birthdayWorker, TryPrepareBirthdayGift(birthdayWorker));
-            PrioritizeFreshWorldContext();
-            return;
-        }
-
-        OfficeActionPoint action = FindEventSpot(birthdayWorker);
-        if (action == null)
-            return;
-
-        List<AIWorkerAgent> guests = SelectGuests(birthdayWorker);
-        if (guests.Count == 0)
+        if (completedBirthdayEvents.Contains(eventKey))
             return;
 
         string birthdayTitle = birthdayWorker.DisplayName + "'s Birthday";
-        string birthdayDescription = "Today is " + birthdayWorker.DisplayName +
-            "'s birthday. Coworkers are gathering to congratulate them.";
-
-        AIWorkerAgent organizer = guests[0];
-        BirthdayGift gift = TryPrepareBirthdayGift(birthdayWorker);
-        float expiresAt = Time.time + 60f;
-        ConversationIntent intent = new()
-        {
-            initiatorAgentId = organizer.AgentId,
-            initiatorName = organizer.DisplayName,
-            intendedPartnerName = birthdayWorker.DisplayName,
-            topic = birthdayWorker.DisplayName + "'s birthday",
-            openingLine = "",
-            generatedByModel = true,
-            actionType = action.actionType,
-            createdAt = Time.time,
-            expiresAt = expiresAt
-        };
-        intent.onOpeningSpoken = () =>
-        {
-            if (completedBirthdayEvents.Contains(eventKey))
-                return;
-
-            completedBirthdayEvents.Add(eventKey);
-            Debug.Log("[Event] " + birthdayDescription, birthdayWorker);
-            LLMBrainService.Instance?.RememberWorldEvent(birthdayDescription);
-            VendingEventDispatcher.Instance?.ShowWorldAnnouncement(
-                birthdayTitle, birthdayDescription, null, 3.5f);
-            ApplyBirthdayGift(birthdayWorker, gift);
-        };
-
-        birthdayWorker.ReceiveSocialInvitation(action, organizer.DisplayName, expiresAt);
-        foreach (AIWorkerAgent guest in guests)
-        {
-            if (guest == null || guest == organizer)
-                continue;
-            guest.ReceiveSocialInvitation(action, organizer.DisplayName, expiresAt);
-        }
-
-        attemptedBirthdayEvents.Add(eventKey);
-        if (!organizer.RequestEventConversation(action, intent))
-        {
-            attemptedBirthdayEvents.Remove(eventKey);
-            return;
-        }
-        StartCoroutine(ClearAttemptIfUncompleted(eventKey, expiresAt));
+        string birthdayDescription = "Today is " + birthdayWorker.DisplayName
+            + "'s birthday. Their coworkers have noticed.";
+        completedBirthdayEvents.Add(eventKey);
+        LLMBrainService.Instance?.RememberWorldEvent(birthdayDescription);
+        VendingEventDispatcher.Instance?.ShowWorldAnnouncement(
+            birthdayTitle, birthdayDescription, null, 3.5f);
+        ApplyBirthdayGift(birthdayWorker, TryPrepareBirthdayGift(birthdayWorker));
+        PrioritizeFreshWorldContext();
     }
 
-    private IEnumerator ClearAttemptIfUncompleted(string eventKey, float expiresAt)
-    {
-        float waitSeconds = Mathf.Max(0.1f, expiresAt - Time.time + 1f);
-        yield return new WaitForSeconds(waitSeconds);
-        if (!completedBirthdayEvents.Contains(eventKey))
-            attemptedBirthdayEvents.Remove(eventKey);
-    }
-
-    private AIWorkerAgent FindBirthdayWorker(bool requireAvailable = true)
+    private AIWorkerAgent FindBirthdayWorker()
     {
         foreach (AIWorkerAgent worker in workers)
         {
             if (worker == null || string.IsNullOrWhiteSpace(worker.Birthday))
                 continue;
-            if (requireAvailable
-                && worker.TryGetComponent(out AgentConversationController conversation)
+            if (worker.TryGetComponent(out AgentConversationController conversation)
                 && conversation.IsInConversation)
                 continue;
             if (IsToday(worker.Birthday))
@@ -1502,17 +1231,6 @@ public class OfficeEventDirector : MonoBehaviour
         }
 
         return null;
-    }
-
-    private static bool IsBirthdayPreparation(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text)
-            || text.IndexOf("birthday", StringComparison.OrdinalIgnoreCase) < 0)
-            return false;
-
-        return text.IndexOf("gift", StringComparison.OrdinalIgnoreCase) >= 0
-            || text.IndexOf("surprise", StringComparison.OrdinalIgnoreCase) >= 0
-            || text.IndexOf("decorat", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static bool IsToday(string dateText)
@@ -1525,78 +1243,16 @@ public class OfficeEventDirector : MonoBehaviour
         return birthday.Month == today.Month && birthday.Day == today.Day;
     }
 
-    private List<AIWorkerAgent> SelectGuests(AIWorkerAgent birthdayWorker)
-    {
-        List<AIWorkerAgent> result = new();
-        foreach (AIWorkerAgent worker in workers)
-        {
-            if (worker == null || worker == birthdayWorker)
-                continue;
-            if (worker.TryGetComponent(out AgentConversationController conversation)
-                && conversation.IsInConversation)
-                continue;
-            result.Add(worker);
-        }
-
-        Shuffle(result);
-        while (result.Count > maxGuests)
-            result.RemoveAt(result.Count - 1);
-        return result;
-    }
-
-    private OfficeActionPoint FindEventSpot(AIWorkerAgent birthdayWorker)
-    {
-        return FindEventSpot(birthdayWorker, null);
-    }
-
-    private OfficeActionPoint FindEventSpot(AIWorkerAgent worker, OfficeStoryBeatSO story)
-    {
-        OfficeActionPoint[] points = FindObjectsOfType<OfficeActionPoint>();
-        OfficeActionPoint best = null;
-        float bestScore = float.MinValue;
-        OfficeActionType preferredType = PreferredStoryLocation(story);
-
-        foreach (OfficeActionPoint point in points)
-        {
-            if (point == null || !AgentConversationController.IsSocialSpot(point.actionType))
-                continue;
-            if (AgentConversationController.IsConversationActiveAt(point))
-                continue;
-            if (point.IsReservedByOther(worker))
-                continue;
-
-            float score = point.actionType == OfficeActionType.BreakSpot ? 20f : 10f;
-            if (point.actionType == preferredType)
-                score += 80f;
-            score -= Vector2.Distance(worker.GetPosition(), point.transform.position);
-            if (score > bestScore)
-            {
-                bestScore = score;
-                best = point;
-            }
-        }
-
-        return best;
-    }
-
-    private static OfficeActionType PreferredStoryLocation(OfficeStoryBeatSO story)
+    private static bool IsPrinterStory(OfficeStoryBeatSO story)
     {
         string text = ((story?.title ?? "") + " " + (story?.topic ?? ""))
             .ToLowerInvariant();
-        if (text.Contains("printer"))
-            return OfficeActionType.Printer;
-        if (text.Contains("folder") || text.Contains("project")
-            || text.Contains("shared drive"))
-            return OfficeActionType.Whiteboard;
-        if (text.Contains("lunch") || text.Contains("snack"))
-            return OfficeActionType.BreakSpot;
-        return story != null && story.kind == OfficeStoryKind.Celebration
-            ? OfficeActionType.BreakSpot : OfficeActionType.ChatSpot;
+        return text.Contains("printer");
     }
 
     private static void UpdateStoryVisual(OfficeStoryBeatSO story, int stage)
     {
-        if (PreferredStoryLocation(story) != OfficeActionType.Printer)
+        if (!IsPrinterStory(story))
             return;
         OfficePrinterController printer =
             FindFirstObjectByType<OfficePrinterController>();
@@ -1642,19 +1298,9 @@ public class OfficeEventDirector : MonoBehaviour
             birthdayWorker.DisplayName + " received a hat as a birthday gift.");
     }
 
-    private static void Shuffle<T>(List<T> values)
-    {
-        for (int i = values.Count - 1; i > 0; i--)
-        {
-            int j = UnityEngine.Random.Range(0, i + 1);
-            (values[i], values[j]) = (values[j], values[i]);
-        }
-    }
-
     private enum BirthdayGiftKind
     {
         None,
-        SmallSnack,
         Hat
     }
 
@@ -1665,7 +1311,6 @@ public class OfficeEventDirector : MonoBehaviour
         public HatCatalogSO.HatPool pool;
 
         public static BirthdayGift None => new() { kind = BirthdayGiftKind.None };
-        public static BirthdayGift SmallSnack => new() { kind = BirthdayGiftKind.SmallSnack };
 
         public static BirthdayGift Hat(HatCatalogSO.HatEntry hat, HatCatalogSO.HatPool pool)
         {
