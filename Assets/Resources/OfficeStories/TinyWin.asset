@@ -19,3 +19,11 @@ MonoBehaviour:
   topic: a difficult task was finished earlier than anyone expected
   memory: '{speaker} and {target} celebrated an unexpectedly early finish.'
   publicAnnouncement: 1
+  officeWideKnowledge: 1
+  requiresAction: 1
+  requiredAction: 17
+  preferredActorAgentId:
+  actionDurationSeconds: 7
+  participantCount: 4
+  noticedSeconds: 2
+  resolutionMemory: '{speaker} gathered the team for a small celebration.'

@@ -19,7 +19,11 @@ MonoBehaviour:
   topic: the printer produced three blank pages and one page nobody recognizes
   memory: '{speaker} noticed the strange printer pages and decided to inspect the machine.'
   publicAnnouncement: 1
+  officeWideKnowledge: 0
   requiresAction: 1
   requiredAction: 7
   preferredActorAgentId: linli
   actionDurationSeconds: 6
+  participantCount: 2
+  noticedSeconds: 4
+  resolutionMemory: '{speaker} cleared the printer problem and confirmed it was working.'

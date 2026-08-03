@@ -1,0 +1,105 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5a8f7cf91b8a4b59a6a0ea580f30d19d, type: 3}
+  m_Name: DefaultStoryVisuals
+  m_EditorClassIdentifier: 
+  entries:
+  - storyId: whiteboard_session
+    displayTitle: Whiteboard Session
+    actionType: 8
+    idleSprite: {fileID: -825733317, guid: 785b504f58dc02e4b9586e1079a4fa35, type: 3}
+    visibleWhenInactive: 1
+    noticedSprite: {fileID: -2119543243, guid: 785b504f58dc02e4b9586e1079a4fa35, type: 3}
+    progressSprite: {fileID: 1270731484, guid: 785b504f58dc02e4b9586e1079a4fa35, type: 3}
+    resolvedSprite: {fileID: -446910271, guid: 785b504f58dc02e4b9586e1079a4fa35, type: 3}
+    worldPosition: {x: 0, y: 4.05}
+    displayWidth: 1.7
+    sortingOrder: 4
+    useTime: 8
+    keepUntilNextDay: 0
+    hideWhenResolved: 0
+    slots:
+    - offset: {x: -0.85, y: -0.75}
+      facing: 3
+    - offset: {x: 0, y: -0.85}
+      facing: 1
+    - offset: {x: 0.85, y: -0.75}
+      facing: 2
+  - storyId: unexpected_package
+    displayTitle: An Unclaimed Package
+    actionType: 15
+    idleSprite: {fileID: 0}
+    visibleWhenInactive: 0
+    noticedSprite: {fileID: 1486583148, guid: 6cd9994f4a9f3254183f4d5e8505313e, type: 3}
+    progressSprite: {fileID: 465712162, guid: 6cd9994f4a9f3254183f4d5e8505313e, type: 3}
+    resolvedSprite: {fileID: 1511218436, guid: 6cd9994f4a9f3254183f4d5e8505313e, type: 3}
+    worldPosition: {x: -7.25, y: 1.3}
+    displayWidth: 0.5
+    sortingOrder: 5
+    useTime: 6
+    keepUntilNextDay: 0
+    hideWhenResolved: 1
+    slots:
+    - offset: {x: 0.85, y: -0.2}
+      facing: 2
+    - offset: {x: 0, y: 0.75}
+      facing: 0
+    - offset: {x: 0, y: -0.85}
+      facing: 1
+    - offset: {x: -0.65, y: -0.55}
+      facing: 3
+  - storyId: wifi_blip
+    displayTitle: The Wi-Fi Blip
+    actionType: 16
+    idleSprite: {fileID: -1183946658, guid: dd7cb7402e50bf24ca6e0ff971cd405b, type: 3}
+    visibleWhenInactive: 1
+    noticedSprite: {fileID: -995777315, guid: dd7cb7402e50bf24ca6e0ff971cd405b, type: 3}
+    progressSprite: {fileID: -3321568, guid: dd7cb7402e50bf24ca6e0ff971cd405b, type: 3}
+    resolvedSprite: {fileID: -1183946658, guid: dd7cb7402e50bf24ca6e0ff971cd405b, type: 3}
+    worldPosition: {x: 6.65, y: 3.65}
+    displayWidth: 0.5
+    sortingOrder: 5
+    useTime: 7
+    keepUntilNextDay: 0
+    hideWhenResolved: 0
+    slots:
+    - offset: {x: -0.85, y: -0.6}
+      facing: 3
+    - offset: {x: 0, y: -0.75}
+      facing: 1
+    - offset: {x: 0.85, y: -0.6}
+      facing: 2
+    - offset: {x: -1.1, y: 0}
+      facing: 3
+  - storyId: tiny_win
+    displayTitle: Tiny Office Victory
+    actionType: 17
+    idleSprite: {fileID: 0}
+    visibleWhenInactive: 0
+    noticedSprite: {fileID: -1537429704, guid: 2ec8e2bae3cdc1049af47a68ae8c94cd, type: 3}
+    progressSprite: {fileID: -1537429704, guid: 2ec8e2bae3cdc1049af47a68ae8c94cd, type: 3}
+    resolvedSprite: {fileID: -1537429704, guid: 2ec8e2bae3cdc1049af47a68ae8c94cd, type: 3}
+    worldPosition: {x: -6.54, y: -3.08}
+    displayWidth: 0.5
+    sortingOrder: 158
+    useTime: 7
+    keepUntilNextDay: 0
+    hideWhenResolved: 1
+    slots:
+    - offset: {x: 0.8, y: 0}
+      facing: 2
+    - offset: {x: 0, y: 0.8}
+      facing: 0
+    - offset: {x: -0.8, y: 0}
+      facing: 3
+    - offset: {x: 0, y: -0.8}
+      facing: 1

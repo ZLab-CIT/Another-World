@@ -27,6 +27,8 @@ public class OfficeStoryBeatSO : ScriptableObject
     [TextArea(1, 3)] public string memory;
     [Tooltip("Public stories receive an announcement; private gossip remains visible only through character behavior.")]
     public bool publicAnnouncement;
+    [Tooltip("When enabled, every agent may immediately know this event. Otherwise only its participants know until they tell someone.")]
+    public bool officeWideKnowledge;
 
     [Header("Optional Physical Consequence")]
     [Tooltip("Queues a real scene action when this story starts. Leave disabled for dialogue-only stories.")]
@@ -35,5 +37,13 @@ public class OfficeStoryBeatSO : ScriptableObject
     [Tooltip("Optional preferred agent id. When unavailable, the selected story speaker acts.")]
     public string preferredActorAgentId;
     [Min(2f)] public float actionDurationSeconds = 5f;
+
+    [Header("Staged Presentation")]
+    [Tooltip("Number of workers who should gather for the physical story action.")]
+    [Range(1, 4)] public int participantCount = 2;
+    [Tooltip("How long the incident is shown before changing to its in-progress visual.")]
+    [Min(1f)] public float noticedSeconds = 4f;
+    [Tooltip("Memory written when the physical action resolves the story.")]
+    [TextArea(1, 2)] public string resolutionMemory;
 
 }

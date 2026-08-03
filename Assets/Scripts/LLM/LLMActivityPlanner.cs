@@ -19,7 +19,8 @@ public sealed class OfficeEpisodePlanner
         List<AIWorkerAgent> workers,
         int requestedCount,
         float temperature,
-        int timeoutSeconds)
+        int timeoutSeconds,
+        bool requestAudienceDecision)
     {
         if (activeBackend == null || activeBackend.IsLocal
             || workers == null || workers.Count < 2)
@@ -33,6 +34,13 @@ public sealed class OfficeEpisodePlanner
         HashSet<OfficeActionType> availableActions = BuildAvailableActions();
         string availableActionNames = JoinActionNames(availableActions);
         string context = BuildCompactContext(workers);
+        string decisionInstruction = requestAudienceDecision
+            ? "Also create one audience decision authored by one agent. It asks office visitors "
+              + "for a meaningful opinion about a new personal, social, creative, or outside-office "
+              + "situation. It must not ask them to buy anything or repeat an established prop event. "
+              + "Give 2-3 genuinely different short options. Each option includes a natural immediate "
+              + "reaction spoken by the author and a concrete consequence seed for future scenes. "
+            : "Set decision to null. ";
         List<ChatMessage> messages = new()
         {
             new ChatMessage("user",
@@ -66,6 +74,26 @@ public sealed class OfficeEpisodePlanner
                 + "represented by the valid action types. Do not create recurring lost, missing, "
                 + "or misplaced-object mysteries; prefer new work, relationship, humor, support, "
                 + "or consequence-driven situations. "
+                + "Office props are action affordances, not a list of conversation topics. Do not "
+                + "mention the printer, whiteboard, package, router, Wi-Fi problem, or cake unless "
+                + "the context says that specific situation is currently unresolved. Do not use "
+                + "snacks, coffee, or gifts as generic kindness; they are allowed only when a fresh "
+                + "physical vending event or an already scheduled promise in the context supports them. "
+                + "At most one beat may concern finishing work, a deadline, productivity, or "
+                + "congratulating someone for completing a task. At least half of the conversations "
+                + "must instead invent premises from biography, interests, contrasting opinions, "
+                + "personal history, outside-office plans, curiosity, humor, uncertainty, or changing "
+                + "relationships. They do not all need to solve something or end in agreement. Give "
+                + "each beat a different social purpose, not merely different wording. At least two "
+                + "beats must introduce genuinely new soft situations that are not copied from "
+                + "Established facts: a personal dilemma, surprising message, research question, "
+                + "outside plan, opinion clash, playful challenge, or relationship change. Invent the "
+                + "specific content from the characters; do not require a new physical scene prop. "
+                + "Use established events in at most two beats per pack. "
+                + "A fact shown under one agent's 'remembers' field is private knowledge of that "
+                + "agent. Other agents must not mention, react to, or discuss it unless that witness "
+                + "tells them during the same conversation. Only Established facts are common "
+                + "knowledge for everyone. "
                 + "Every beat needs one private thought from one listed participant. It must "
                 + "reveal personality, uncertainty, anticipation, or a personal reaction, not "
                 + "repeat dialogue, narrate movement, issue a command, or show a numeric stat. "
@@ -73,8 +101,11 @@ public sealed class OfficeEpisodePlanner
                 + "event is optional and must be supported by the dialogue; type is secret, "
                 + "gossip, promise, favor_request, favor_done, plan, invitation, or conflict. "
                 + "resolve may copy an existing scheduled thread subject when this beat fulfills it. "
+                + decisionInstruction
                 + "Return JSON only with this compact schema: "
-                + "{\"beats\":[{\"id\":string,\"kind\":\"conversation|phone|activity\","
+                + "{\"decision\":null|{\"author\":string,\"question\":string,"
+                + "\"options\":[{\"label\":string,\"reaction\":string,\"consequence\":string}]},"
+                + "\"beats\":[{\"id\":string,\"kind\":\"conversation|phone|activity\","
                 + "\"topic\":string,\"delay\":number,\"people\":[string],"
                 + "\"thought\":{\"who\":string,\"text\":string},"
                 + "\"actions\":[{\"who\":string,\"type\":string,\"target\":string,"
@@ -106,7 +137,7 @@ public sealed class OfficeEpisodePlanner
             string raw = await activeBackend.CompleteAsync(messages, options);
             OfficeEpisodePack pack = ParseAndValidate(
                 raw, workers, knownAgents, availableActions,
-                requestedCount, providerLabel);
+                requestedCount, providerLabel, requestAudienceDecision);
             if (pack == null && !string.IsNullOrWhiteSpace(raw))
                 Debug.LogWarning("[Episode director] rejected an invalid pack from "
                     + providerLabel + ".");
@@ -153,7 +184,7 @@ public sealed class OfficeEpisodePlanner
         AppendRecent(context,
             "Established facts (do not repeat their discovery; show consequences)",
             brain.WorldEvents, 3);
-        AppendRecent(context, "Avoid recent topics", brain.RecentGlobalTopics, 4);
+        AppendRecent(context, "Avoid recent topics", brain.RecentGlobalTopics, 8);
 
         HashSet<AgentProfile> profiles = new(brain.Profiles.Values);
         int scheduled = 0;
@@ -225,7 +256,8 @@ public sealed class OfficeEpisodePlanner
         Dictionary<string, string> knownAgents,
         HashSet<OfficeActionType> availableActions,
         int requestedCount,
-        string providerLabel)
+        string providerLabel,
+        bool requestAudienceDecision)
     {
         string json = TextUtils.ExtractJson(raw);
         if (string.IsNullOrWhiteSpace(json))
@@ -266,6 +298,7 @@ public sealed class OfficeEpisodePlanner
         }
 
         FavorConversationMix(valid);
+        ApplyNarrativeVariety(valid);
         int minimumCount = 2;
         int conversationCount = valid.FindAll(beat =>
             string.Equals(beat.kind, "conversation",
@@ -282,7 +315,52 @@ public sealed class OfficeEpisodePlanner
         {
             packId = TextUtils.CleanShortText(providerLabel, 3) + "-"
                 + Guid.NewGuid().ToString("N").Substring(0, 8),
-            beats = valid.ToArray()
+            beats = valid.ToArray(),
+            audienceDecision = ValidateAudienceDecision(dto.decision,
+                knownAgents, requestAudienceDecision)
+        };
+    }
+
+    private static OfficeAudienceDecision ValidateAudienceDecision(
+        AudienceDecisionDTO raw, Dictionary<string, string> knownAgents,
+        bool requested)
+    {
+        if (!requested || raw == null || raw.options == null
+            || raw.options.Length < 2 || raw.options.Length > 3)
+            return null;
+        string author = ResolveAgent(raw.author, knownAgents);
+        string question = TextUtils.CleanShortText(raw.question, 26);
+        if (string.IsNullOrWhiteSpace(author) || question.Length < 12)
+            return null;
+        List<OfficeAudienceDecisionOption> options = new();
+        HashSet<string> labels = new(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < raw.options.Length; i++)
+        {
+            AudienceDecisionOptionDTO candidate = raw.options[i];
+            string label = TextUtils.CleanShortText(candidate?.label, 10);
+            string reaction = TextUtils.CleanShortText(candidate?.reaction, 18);
+            string consequence = TextUtils.CleanShortText(candidate?.consequence, 28);
+            if (string.IsNullOrWhiteSpace(label) || !labels.Add(label)
+                || string.IsNullOrWhiteSpace(reaction)
+                || string.IsNullOrWhiteSpace(consequence))
+                return null;
+            options.Add(new OfficeAudienceDecisionOption
+            {
+                optionId = "option-" + (i + 1),
+                label = label,
+                reaction = reaction,
+                consequence = consequence
+            });
+        }
+        return new OfficeAudienceDecision
+        {
+            decisionId = "office-" + Guid.NewGuid().ToString("N"),
+            authorAgentId = author,
+            authorDisplayName = knownAgents.TryGetValue(author, out string name)
+                ? name : author,
+            question = question,
+            durationSeconds = 180,
+            options = options.ToArray()
         };
     }
 
@@ -723,6 +801,81 @@ public sealed class OfficeEpisodePlanner
         }
     }
 
+    private void ApplyNarrativeVariety(List<OfficeEpisodeBeat> beats)
+    {
+        if (beats == null || beats.Count == 0)
+            return;
+        bool vendingContext = HasRecentVendingContext();
+        int workCompletionBeats = 0;
+        for (int i = 0; i < beats.Count;)
+        {
+            OfficeEpisodeBeat beat = beats[i];
+            string text = BuildBeatText(beat);
+            bool remove = (!vendingContext && ContainsAny(text,
+                    "snack", "coffee", "espresso", "vending"))
+                || MentionsInactivePhysicalStory(text);
+            if (IsWorkCompletionTheme(text))
+            {
+                workCompletionBeats++;
+                remove |= workCompletionBeats > 1;
+            }
+            if (remove)
+            {
+                beats.RemoveAt(i);
+                continue;
+            }
+            i++;
+        }
+    }
+
+    private bool HasRecentVendingContext()
+    {
+        List<string> events = brain.WorldEvents;
+        int start = Mathf.Max(0, events.Count - 3);
+        for (int i = start; i < events.Count; i++)
+            if (TextUtils.ContainsIgnoreCase(
+                    events[i], "physical vending purchase"))
+                return true;
+        return false;
+    }
+
+    private bool MentionsInactivePhysicalStory(string text)
+    {
+        if (ContainsAny(text, "printer")
+            && !brain.HasPendingOfficeStory("printer_mystery"))
+            return true;
+        if (ContainsAny(text, "whiteboard")
+            && !brain.HasPendingOfficeStory("whiteboard_session"))
+            return true;
+        if (ContainsAny(text, "package", "parcel")
+            && !brain.HasPendingOfficeStory("unexpected_package"))
+            return true;
+        if (ContainsAny(text, "router", "wi-fi", "wifi")
+            && !brain.HasPendingOfficeStory("wifi_blip"))
+            return true;
+        return ContainsAny(text, "cake")
+            && !brain.HasPendingOfficeStory("tiny_win");
+    }
+
+    private static bool IsWorkCompletionTheme(string text)
+    {
+        return ContainsAny(text, "finished work", "finish the work",
+            "finished the task", "finished the project", "completed the task",
+            "completed our work", "task is done", "wrapped up",
+            "ahead of schedule", "met the deadline", "beat the deadline",
+            "shipped the", "productivity", "early finish");
+    }
+
+    private static string BuildBeatText(OfficeEpisodeBeat beat)
+    {
+        StringBuilder text = new();
+        text.Append(beat?.topic).Append(' ').Append(beat?.memory);
+        if (beat?.dialogue != null)
+            foreach (OfficeEpisodeDialogueLine line in beat.dialogue)
+                text.Append(' ').Append(line?.line);
+        return text.ToString().ToLowerInvariant();
+    }
+
     private static bool EnsureExecutablePromises(
         List<OfficeEpisodeDialogueLine> lines,
         List<OfficeEpisodeAction> actions,
@@ -993,6 +1146,23 @@ public sealed class OfficeEpisodePlanner
     private sealed class EpisodePackDTO
     {
         public EpisodeBeatDTO[] beats;
+        public AudienceDecisionDTO decision;
+    }
+
+    [Serializable]
+    private sealed class AudienceDecisionDTO
+    {
+        public string author;
+        public string question;
+        public AudienceDecisionOptionDTO[] options;
+    }
+
+    [Serializable]
+    private sealed class AudienceDecisionOptionDTO
+    {
+        public string label;
+        public string reaction;
+        public string consequence;
     }
 
     [Serializable]

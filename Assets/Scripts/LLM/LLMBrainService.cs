@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -62,6 +63,27 @@ public sealed class OfficeEpisodePack
 {
     public string packId;
     public OfficeEpisodeBeat[] beats;
+    public OfficeAudienceDecision audienceDecision;
+}
+
+[Serializable]
+public sealed class OfficeAudienceDecision
+{
+    public string decisionId;
+    public string authorAgentId;
+    public string authorDisplayName;
+    public string question;
+    public int durationSeconds = 180;
+    public OfficeAudienceDecisionOption[] options;
+}
+
+[Serializable]
+public sealed class OfficeAudienceDecisionOption
+{
+    public string optionId;
+    public string label;
+    public string reaction;
+    public string consequence;
 }
 
 [Serializable]
@@ -373,9 +395,18 @@ public class LLMBrainService : MonoBehaviour
     public bool EnableSocialReplies => enableSocialReplies;
     public bool HasRemoteEpisodeProvider => episodeBackends.Count > 0;
     public double WorldUnixSeconds => worldUnixSeconds;
-    public DateTime WorldDateTime =>
-        DateTimeOffset.FromUnixTimeSeconds((long)Math.Max(0d, worldUnixSeconds))
-            .ToLocalTime().DateTime;
+    public DateTime WorldDateTime
+    {
+        get
+        {
+            DateTime simulated = DateTimeOffset.FromUnixTimeSeconds(
+                    (long)Math.Max(0d, worldUnixSeconds))
+                .ToLocalTime().DateTime;
+            // The office schedule may run faster, but weekday and holidays must
+            // remain aligned with the real local calendar.
+            return DateTime.Today.Add(simulated.TimeOfDay);
+        }
+    }
     public WorldSchedulePhase SchedulePhase => ResolveSchedulePhase(WorldDateTime.Hour);
     public string ScheduleContext
     {
@@ -582,9 +613,26 @@ public class LLMBrainService : MonoBehaviour
 
     public void RecordOfficeStoryStarted(string storyId)
     {
+        RecordOfficeStoryStarted(storyId, "", null);
+    }
+
+    public void RecordOfficeStoryStarted(string storyId, string actorAgentId,
+        IEnumerable<string> participantAgentIds)
+    {
         PersistedOfficeStoryState state = GetOrCreateOfficeStory(storyId);
-        if (state != null)
-            state.started++;
+        if (state == null)
+            return;
+        state.started++;
+        state.visualStage = 1;
+        state.stageChangedWorldTime = worldUnixSeconds;
+        state.actorAgentId = actorAgentId ?? "";
+        state.participantAgentIds = participantAgentIds != null
+            ? new List<string>(participantAgentIds)
+            : new List<string>();
+        state.visitorAgentIds = new List<string>();
+        state.startedCalendarDate = WorldDateTime.ToString(
+            "yyyy-MM-dd", CultureInfo.InvariantCulture);
+        SaveState();
     }
 
     public void RecordOfficeStoryResolved(string storyId)
@@ -595,6 +643,41 @@ public class LLMBrainService : MonoBehaviour
         if (state.started == 0)
             state.started = 1;
         state.resolved = Mathf.Min(state.started, state.resolved + 1);
+        state.visualStage = 3;
+        state.stageChangedWorldTime = worldUnixSeconds;
+        SaveState();
+    }
+
+    public void SetOfficeStoryVisualStage(string storyId, int stage)
+    {
+        PersistedOfficeStoryState state = GetOrCreateOfficeStory(storyId);
+        if (state == null)
+            return;
+        state.visualStage = Mathf.Clamp(stage, 0, 4);
+        state.stageChangedWorldTime = worldUnixSeconds;
+        SaveState();
+    }
+
+    public PersistedOfficeStoryState GetOfficeStoryState(string storyId)
+    {
+        officeStories.TryGetValue(
+            storyId ?? "", out PersistedOfficeStoryState state);
+        return state;
+    }
+
+    public void RecordOfficeStoryVisit(string storyId, string agentId)
+    {
+        if (string.IsNullOrWhiteSpace(agentId))
+            return;
+        PersistedOfficeStoryState state = GetOrCreateOfficeStory(storyId);
+        if (state == null)
+            return;
+        state.visitorAgentIds ??= new List<string>();
+        if (state.visitorAgentIds.Exists(existing => string.Equals(
+                existing, agentId, StringComparison.OrdinalIgnoreCase)))
+            return;
+        state.visitorAgentIds.Add(agentId);
+        SaveState();
     }
 
     public bool HasPendingOfficeStory(string storyId)
@@ -638,7 +721,8 @@ public class LLMBrainService : MonoBehaviour
     }
 
     public async Task<OfficeEpisodePack> GenerateEpisodePackAsync(
-        List<AIWorkerAgent> workers, int requestedCount)
+        List<AIWorkerAgent> workers, int requestedCount,
+        bool requestAudienceDecision = false)
     {
         if (episodePlanner == null || workers == null || workers.Count < 2
             || episodeBackends.Count == 0)
@@ -657,7 +741,8 @@ public class LLMBrainService : MonoBehaviour
             OfficeEpisodePack pack = await episodePlanner.GenerateEpisodePackAsync(
                 provider.backend, provider.label, workers,
                 Mathf.Clamp(requestedCount, 4, 8),
-                temperature, Mathf.Min(requestTimeoutSeconds, 45));
+                temperature, Mathf.Min(requestTimeoutSeconds, 45),
+                requestAudienceDecision);
             if (pack != null && pack.beats != null && pack.beats.Length > 0)
             {
                 provider.consecutiveFailures = 0;
@@ -679,6 +764,100 @@ public class LLMBrainService : MonoBehaviour
         }
 
         return null;
+    }
+
+    public async Task<OfficeNewspaper> GenerateDailyNewspaperAsync(
+        string calendarDate, string interactionContext)
+    {
+        if (episodeBackends.Count == 0)
+            return null;
+        StringBuilder source = new();
+        source.Append("Date: ").AppendLine(calendarDate);
+        int worldStart = Mathf.Max(0, worldEvents.Count - 10);
+        for (int i = worldStart; i < worldEvents.Count; i++)
+            source.Append("Event: ").AppendLine(
+                TextUtils.CleanShortText(worldEvents[i], 24));
+        int lineStart = Mathf.Max(0, recentGlobalUtterances.Count - 6);
+        for (int i = lineStart; i < recentGlobalUtterances.Count; i++)
+            source.Append("Quote candidate: ").AppendLine(
+                TextUtils.CleanShortText(recentGlobalUtterances[i], 18));
+        if (!string.IsNullOrWhiteSpace(interactionContext))
+            source.Append("Visitor activity: ").AppendLine(
+                TextUtils.CleanShortText(interactionContext, 80));
+
+        List<ChatMessage> messages = new()
+        {
+            new ChatMessage("user",
+                "Create a concise English daily newspaper for a persistent fictional office. "
+                + "Use only supplied facts. Prefer consequences and relationship changes over "
+                + "generic work summaries. Do not invent purchases, visitors, or completed events. "
+                + "The headline is under 9 words; summary under 30 words; exactly 3 stories under "
+                + "30 words each; quote under 18 words; every remaining field under 24 words. "
+                + "Return JSON only: {\"date\":string,\"headline\":string,\"summary\":string,"
+                + "\"stories\":[string,string,string],\"quote\":string,"
+                + "\"decisionResult\":string,\"visitorAcknowledgement\":string,"
+                + "\"tomorrowTeaser\":string}.\n\n" + source)
+        };
+        LLMOptions options = new()
+        {
+            requestLabel = "DailyNewspaper",
+            temperature = 0.68f,
+            maxTokens = 520,
+            jsonMode = true,
+            reasoningEffort = "low",
+            excludeReasoning = true,
+            timeoutSeconds = Mathf.Min(requestTimeoutSeconds, 35),
+            maxRetries = 0,
+            highPriority = false
+        };
+        for (int i = 0; i < episodeBackends.Count; i++)
+        {
+            EpisodeBackendState provider = episodeBackends[
+                (nextEpisodeBackendIndex + i) % episodeBackends.Count];
+            if (provider?.backend == null
+                || Time.unscaledTime < provider.circuitOpenUntil)
+                continue;
+            try
+            {
+                string raw = await provider.backend.CompleteAsync(messages, options);
+                OfficeNewspaper newspaper = JsonUtility.FromJson<OfficeNewspaper>(
+                    TextUtils.ExtractJson(raw));
+                if (IsValidNewspaper(newspaper))
+                {
+                    newspaper.date = calendarDate;
+                    return newspaper;
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("[Daily newspaper] " + provider.label
+                    + " failed: " + exception.Message, this);
+            }
+        }
+        return null;
+    }
+
+    private static bool IsValidNewspaper(OfficeNewspaper newspaper)
+    {
+        if (newspaper == null || string.IsNullOrWhiteSpace(newspaper.headline)
+            || string.IsNullOrWhiteSpace(newspaper.summary)
+            || newspaper.stories == null || newspaper.stories.Length < 2)
+            return false;
+        newspaper.headline = TextUtils.CleanShortText(newspaper.headline, 10);
+        newspaper.summary = TextUtils.CleanShortText(newspaper.summary, 32);
+        newspaper.quote = TextUtils.CleanShortText(newspaper.quote, 20);
+        newspaper.decisionResult = TextUtils.CleanShortText(
+            newspaper.decisionResult, 28);
+        newspaper.visitorAcknowledgement = TextUtils.CleanShortText(
+            newspaper.visitorAcknowledgement, 28);
+        newspaper.tomorrowTeaser = TextUtils.CleanShortText(
+            newspaper.tomorrowTeaser, 28);
+        List<string> stories = new();
+        foreach (string story in newspaper.stories)
+            if (!string.IsNullOrWhiteSpace(story) && stories.Count < 3)
+                stories.Add(TextUtils.CleanShortText(story, 32));
+        newspaper.stories = stories.ToArray();
+        return newspaper.stories.Length >= 2;
     }
 
     public async Task<ConversationScript> GenerateConversationAsync(
@@ -855,7 +1034,15 @@ public class LLMBrainService : MonoBehaviour
             return;
 
         foreach (string worldEvent in persistedState.worldEvents)
+        {
+            if (persistedState.version < 7
+                && IsLegacyPackageKnowledge(worldEvent))
+                continue;
+            if (persistedState.version < 8
+                && IsLegacyRoutineNarrativeFact(worldEvent))
+                continue;
             RememberWorldEvent(worldEvent);
+        }
     }
 
     private void RestoreSimulationState()
@@ -863,6 +1050,10 @@ public class LLMBrainService : MonoBehaviour
         double realNow = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         worldUnixSeconds = persistedState != null && persistedState.worldUnixSeconds > 0d
             ? persistedState.worldUnixSeconds : realNow;
+        Replace(recentGlobalTopics,
+            persistedState?.recentNarrativeTopics, 24);
+        Replace(recentGlobalUtterances,
+            persistedState?.recentNarrativeUtterances, 48);
 
         if (persistedState != null && DateTime.TryParse(persistedState.savedAtUtc,
                 CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind,
@@ -895,7 +1086,20 @@ public class LLMBrainService : MonoBehaviour
         if (persistedState?.officeStories != null)
             foreach (PersistedOfficeStoryState story in persistedState.officeStories)
                 if (story != null && !string.IsNullOrWhiteSpace(story.storyId))
+                {
+                    story.participantAgentIds ??= new List<string>();
+                    story.visitorAgentIds ??= new List<string>();
+                    if (string.IsNullOrWhiteSpace(story.startedCalendarDate)
+                        && story.started > 0)
+                        story.startedCalendarDate = WorldDateTime.ToString(
+                            "yyyy-MM-dd", CultureInfo.InvariantCulture);
+                    if (story.started > story.resolved && story.visualStage == 0)
+                        story.visualStage = 1;
+                    else if (story.started > 0 && story.resolved >= story.started
+                        && story.visualStage == 0)
+                        story.visualStage = 4;
                     officeStories[story.storyId] = story;
+                }
 
         furniture.Clear();
         if (persistedState?.furniture != null)
@@ -907,6 +1111,8 @@ public class LLMBrainService : MonoBehaviour
         persistedEpisodeReserve = persistedState?.episodeReserve != null
             ? new List<OfficeEpisodeBeat>(persistedState.episodeReserve)
             : new List<OfficeEpisodeBeat>();
+        if (persistedState != null && persistedState.version < 8)
+            persistedEpisodeReserve.Clear();
         persistedEpisodeReserve.RemoveAll(beat =>
             !HasEpisodeThought(beat) || IsStaleSnackMysteryBeat(beat));
     }
@@ -935,15 +1141,29 @@ public class LLMBrainService : MonoBehaviour
         Replace(profile.recentOpenings, saved.recentOpenings, 8);
         Replace(profile.recentUtterances, saved.recentUtterances, 10);
         profile.memory.RemoveAll(IsStaleSnackMystery);
+        if (persistedState.version < 7)
+            profile.memory.RemoveAll(IsLegacyPackageKnowledge);
+        if (persistedState.version < 8)
+            profile.memory.RemoveAll(IsLegacyRoutineNarrativeFact);
         profile.socialMemory.RemoveAll(entry => entry == null
             || string.IsNullOrWhiteSpace(entry.type)
             || string.IsNullOrWhiteSpace(entry.sourceAgent)
             || string.IsNullOrWhiteSpace(entry.subject)
-            || IsStaleSnackMystery(entry.subject));
+            || IsStaleSnackMystery(entry.subject)
+            || (persistedState.version < 7
+                && IsLegacyPackageKnowledge(entry.subject))
+            || (persistedState.version < 8
+                && IsLegacyRoutineNarrativeFact(entry.subject)));
         profile.recentTopics.RemoveAll(IsStaleSnackMystery);
         profile.recentOpenings.RemoveAll(IsStaleSnackMystery);
         profile.recentUtterances.RemoveAll(IsStaleSnackMystery);
         profile.recentUtterances.RemoveAll(IsLegacyFallbackUtterance);
+        if (persistedState.version < 7)
+        {
+            profile.recentTopics.RemoveAll(IsLegacyPackageKnowledge);
+            profile.recentOpenings.RemoveAll(IsLegacyPackageKnowledge);
+            profile.recentUtterances.RemoveAll(IsLegacyPackageKnowledge);
+        }
     }
 
     private static void Replace(List<string> target, List<string> source, int capacity)
@@ -967,6 +1187,39 @@ public class LLMBrainService : MonoBehaviour
     {
         return !string.IsNullOrWhiteSpace(line)
             && LegacyFallbackUtterances.Contains(line.Trim());
+    }
+
+    private static bool IsLegacyPackageKnowledge(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        string lower = text.ToLowerInvariant();
+        return lower.Contains("unclaimed package")
+            || lower.Contains("no recipient name")
+            || lower.Contains("unexpected_package")
+            || (lower.Contains("package")
+                && lower.Contains("office address"));
+    }
+
+    private static bool IsLegacyRoutineNarrativeFact(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)
+            || TextUtils.ContainsIgnoreCase(
+                text, "physical vending purchase"))
+            return false;
+        string lower = text.ToLowerInvariant();
+        bool genericFood = lower.Contains("snack")
+            || lower.Contains("coffee") || lower.Contains("espresso");
+        bool finishedWork = lower.Contains("finished work")
+            || lower.Contains("finished the task")
+            || lower.Contains("finished the project")
+            || lower.Contains("completed the task")
+            || lower.Contains("completed our work")
+            || lower.Contains("task is done")
+            || lower.Contains("ahead of schedule")
+            || lower.Contains("beat the deadline")
+            || lower.Contains("early finish");
+        return genericFood || finishedWork;
     }
 
     internal static bool IsStaleSnackMystery(string text)
@@ -1045,7 +1298,8 @@ public class LLMBrainService : MonoBehaviour
         HashSet<AgentProfile> uniqueProfiles = new(profiles.Values);
         WorldStateStore.Save(uniqueProfiles, worldEvents, worldUnixSeconds,
             runtimeStates.Values, relationships.Values, persistedEpisodeReserve,
-            officeStories.Values, furniture.Values);
+            officeStories.Values, furniture.Values, recentGlobalTopics,
+            recentGlobalUtterances);
     }
 
     private double CalculateOfflineWorldSeconds(PersistedAgentRuntimeState state)

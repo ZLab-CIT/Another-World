@@ -57,6 +57,7 @@ public class OfficeEventDirector : MonoBehaviour
     private bool clearReserveAfterPendingEpisode;
     private bool loggedMissingEpisodeProvider;
     private bool unresolvedStoryRecoveryChecked;
+    private float nextStoryActionRecoveryTime;
     private int consecutiveEpisodeRefillFailures;
     private PendingEpisodeExecution pendingEpisode;
 
@@ -72,6 +73,8 @@ public class OfficeEventDirector : MonoBehaviour
         if (hatCatalog == null)
             hatCatalog = Resources.Load<HatCatalogSO>("VendingEvents/HatCatalog");
         ambientStories = Resources.LoadAll<OfficeStoryBeatSO>("OfficeStories");
+        OfficeStoryWorldController.Ensure();
+        OfficeInteractionHubClient.Ensure();
         nextCheckTime = Time.time + firstCheckDelaySeconds;
         nextRandomEventTime = Time.time + firstRandomEventDelaySeconds;
         nextEpisodeTime = Time.time + firstEpisodeDelaySeconds;
@@ -168,10 +171,17 @@ public class OfficeEventDirector : MonoBehaviour
         {
             unresolvedStoryRecoveryChecked = true;
             RecoverUnresolvedStoryActions();
+            nextStoryActionRecoveryTime = Time.time + 20f;
+        }
+        else if (brain != null && Time.time >= nextStoryActionRecoveryTime)
+        {
+            nextStoryActionRecoveryTime = Time.time + 20f;
+            RecoverUnresolvedStoryActions();
         }
         if (enableRandomOfficeEvents && Time.time >= nextRandomEventTime
             && pendingEpisode == null && !episodeRefillInFlight
-            && episodeReserve.Count <= Mathf.Clamp(episodeRefillThreshold, 1, 4))
+            && episodeReserve.Count <= Mathf.Clamp(episodeRefillThreshold, 1, 4)
+            && !HasUnresolvedMajorStory())
             TryInjectRandomOfficeEvent();
 
         if (!episodeRefillInFlight && Time.time >= nextEpisodeRefillTime
@@ -233,7 +243,9 @@ public class OfficeEventDirector : MonoBehaviour
                 ? 5 : Mathf.Clamp(episodePackSize, 6, 8);
             OfficeEpisodePack pack = LLMBrainService.Instance != null
                 ? await LLMBrainService.Instance.GenerateEpisodePackAsync(
-                    snapshot, requested)
+                    snapshot, requested,
+                    OfficeInteractionHubClient.Instance != null
+                    && OfficeInteractionHubClient.Instance.ShouldRequestDecision)
                 : null;
             if (this == null)
                 return;
@@ -247,6 +259,9 @@ public class OfficeEventDirector : MonoBehaviour
             }
 
             consecutiveEpisodeRefillFailures = 0;
+            if (pack.audienceDecision != null)
+                OfficeInteractionHubClient.Instance?.PublishDecision(
+                    pack.audienceDecision);
             foreach (OfficeEpisodeBeat beat in pack.beats)
             {
                 if (beat == null || episodeReserve.Count >= 18)
@@ -849,16 +864,24 @@ public class OfficeEventDirector : MonoBehaviour
         LLMBrainService brain = LLMBrainService.Instance;
         if (brain == null || beat == null)
             return;
+        TextUtils.AddRecent(brain.RecentGlobalTopics, beat.topic, 24);
+        if (beat.dialogue != null)
+            foreach (OfficeEpisodeDialogueLine line in beat.dialogue)
+                if (line != null)
+                    TextUtils.AddRecent(
+                        brain.RecentGlobalUtterances, line.line, 48);
         if (!string.IsNullOrWhiteSpace(beat.memory))
         {
             if (beat.participantIds != null)
                 foreach (string agentId in beat.participantIds)
                     brain.Remember(agentId, beat.memory);
-            if (beat.socialEvent == null || !beat.socialEvent.isPrivate)
-                brain.RememberWorldEvent(beat.memory);
         }
         if (!string.IsNullOrWhiteSpace(beat.resolvesSubject))
             brain.CompleteScheduledEpisodeMemory(beat.resolvesSubject);
+        OfficeInteractionHubClient.Instance?.RecordWorldEvent(
+            "episode", beat.topic,
+            string.IsNullOrWhiteSpace(beat.memory) ? beat.topic : beat.memory,
+            beat.participantIds ?? Array.Empty<string>());
     }
 
     private void PersistEpisodeReserve()
@@ -915,33 +938,56 @@ public class OfficeEventDirector : MonoBehaviour
             ? preferredActor
             : PickStorySpeaker(available, story.topic);
         available.Remove(speaker);
-        AIWorkerAgent target = available[
-            UnityEngine.Random.Range(0, available.Count)];
+        List<AIWorkerAgent> participants = new() { speaker };
+        int participantCount = Mathf.Clamp(
+            story.participantCount, 2, Mathf.Min(4, available.Count + 1));
+        while (participants.Count < participantCount && available.Count > 0)
+        {
+            int index = UnityEngine.Random.Range(0, available.Count);
+            participants.Add(available[index]);
+            available.RemoveAt(index);
+        }
+        if (story.requiredAction == OfficeActionType.Celebrate)
+        {
+            participants.Clear();
+            participants.Add(speaker);
+            foreach (AIWorkerAgent worker in workers)
+                if (worker != null && !participants.Contains(worker))
+                    participants.Add(worker);
+        }
+        AIWorkerAgent target = participants.Count > 1
+            ? participants[1] : speaker;
         string memory = Expand(story.memory, speaker, target);
         if (string.IsNullOrWhiteSpace(memory))
             memory = Expand(story.topic, speaker, target);
         string worldEvent = story.title + ": " + memory;
 
         LLMBrainService brain = LLMBrainService.Instance;
-        brain?.Remember(speaker.AgentId, memory);
-        brain?.Remember(target.AgentId, memory);
-        brain?.RememberWorldEvent(worldEvent);
+        foreach (AIWorkerAgent participant in participants)
+            brain?.Remember(participant.AgentId, memory);
+        if (story.officeWideKnowledge)
+            brain?.RememberWorldEvent(worldEvent);
         if (story.requiresAction)
-            brain?.RecordOfficeStoryStarted(story.storyId);
-        UpdateStoryVisual(story, 0);
-        QueueRequiredStoryAction(story, speaker);
+            brain?.RecordOfficeStoryStarted(story.storyId, speaker.AgentId,
+                participants.ConvertAll(participant => participant.AgentId));
+        UpdateStoryVisual(story, 1);
+        QueueRequiredStoryActions(story, speaker, participants);
         if (story.publicAnnouncement)
             VendingEventDispatcher.Instance?.ShowWorldAnnouncement(
                 story.title, memory, null, 3.5f);
 
         RememberRecentStory(story.storyId);
+        OfficeInteractionHubClient.Instance?.RecordWorldEvent(
+            "office_story", story.title, memory,
+            participants.ConvertAll(participant => participant.AgentId).ToArray());
         ScheduleNextRandomEvent(true);
-        PrioritizeFreshWorldContext();
+        if (story.officeWideKnowledge)
+            PrioritizeFreshWorldContext();
         Debug.Log("[Office event] " + worldEvent, this);
     }
 
-    private void QueueRequiredStoryAction(
-        OfficeStoryBeatSO story, AIWorkerAgent fallbackActor)
+    private void QueueRequiredStoryActions(OfficeStoryBeatSO story,
+        AIWorkerAgent fallbackActor, IEnumerable<AIWorkerAgent> participants)
     {
         if (story == null || !story.requiresAction
             || story.requiredAction == OfficeActionType.Custom)
@@ -952,22 +998,43 @@ public class OfficeEventDirector : MonoBehaviour
         if (actor == null)
             return;
 
-        OfficeActivityPlan plan = new()
+        List<AIWorkerAgent> ordered = new() { actor };
+        if (participants != null)
+            foreach (AIWorkerAgent participant in participants)
+                if (participant != null && !ordered.Contains(participant))
+                    ordered.Add(participant);
+
+        string sequenceBase = "story:" + story.storyId + ":"
+            + Time.frameCount;
+        int queued = 0;
+        PersistedOfficeStoryState storyState =
+            LLMBrainService.Instance?.GetOfficeStoryState(story.storyId);
+        foreach (AIWorkerAgent participant in ordered)
         {
-            actionType = story.requiredAction,
-            destinationMode = ResolveEpisodeDestination(story.requiredAction),
-            sequenceId = "story:" + story.storyId + ":" + Time.frameCount,
-            sequenceStep = 1,
-            objective = story.topic,
-            durationSeconds = Mathf.Clamp(
-                story.actionDurationSeconds, 2f, 15f),
-            reason = story.topic,
-            isDirected = true,
-            remainingStartAttempts = 12
-        };
-        if (actor.QueueEpisodeActivity(plan, true))
-            Debug.Log("[Office event action] " + actor.DisplayName
-                + " -> " + story.requiredAction, this);
+            if (story.requiredAction == OfficeActionType.Celebrate
+                && HasVisited(storyState, participant.AgentId))
+                continue;
+            OfficeActivityPlan plan = new()
+            {
+                actionType = story.requiredAction,
+                destinationMode = ResolveEpisodeDestination(story.requiredAction),
+                sequenceId = sequenceBase + ":" + participant.AgentId,
+                sequenceStep = 1,
+                objective = story.topic,
+                durationSeconds = Mathf.Clamp(story.actionDurationSeconds
+                    + (participant == actor ? 0f : 2f), 2f, 15f),
+                reason = participant == actor
+                    ? story.topic
+                    : "join coworkers responding to " + story.title,
+                isDirected = true,
+                remainingStartAttempts = 12
+            };
+            if (participant.QueueEpisodeActivity(plan, true))
+                queued++;
+        }
+        if (queued > 0)
+            Debug.Log("[Office event action] " + queued + " workers -> "
+                + story.requiredAction, this);
     }
 
     private void RecoverUnresolvedStoryActions()
@@ -977,14 +1044,39 @@ public class OfficeEventDirector : MonoBehaviour
         foreach (OfficeStoryBeatSO story in ambientStories)
         {
             if (story == null || !story.requiresAction
-                || !HasUnresolvedStoryOccurrence(story))
+                || !HasUnresolvedStoryOccurrence(story)
+                || HasQueuedStoryAction(story.storyId))
                 continue;
             LLMBrainService brain = LLMBrainService.Instance;
             if (brain != null && !brain.HasOfficeStoryState(story.storyId))
                 brain.RecordOfficeStoryStarted(story.storyId);
-            UpdateStoryVisual(story, 0);
-            QueueRequiredStoryAction(story, FirstAvailable(workers));
+            PersistedOfficeStoryState state =
+                brain?.GetOfficeStoryState(story.storyId);
+            if (state != null && state.visualStage == 0)
+                brain.SetOfficeStoryVisualStage(story.storyId, 1);
+            UpdateStoryVisual(story,
+                state != null ? Mathf.Max(1, state.visualStage) : 1);
+            AIWorkerAgent actor = FindWorker(state?.actorAgentId)
+                ?? FirstAvailable(workers);
+            List<AIWorkerAgent> participants = new();
+            if (state?.participantAgentIds != null)
+                foreach (string participantId in state.participantAgentIds)
+                {
+                    AIWorkerAgent participant = FindWorker(participantId);
+                    if (participant != null)
+                        participants.Add(participant);
+                }
+            QueueRequiredStoryActions(story, actor, participants);
         }
+    }
+
+    private bool HasQueuedStoryAction(string storyId)
+    {
+        string prefix = "story:" + storyId + ":";
+        foreach (AIWorkerAgent worker in workers)
+            if (worker != null && worker.HasSequenceWithPrefix(prefix))
+                return true;
+        return false;
     }
 
     public void NotifyStoryActionCompleted(
@@ -999,13 +1091,62 @@ public class OfficeEventDirector : MonoBehaviour
                 || story.requiredAction != actionType
                 || !HasUnresolvedStoryOccurrence(story))
                 continue;
+            PersistedOfficeStoryState state =
+                brain.GetOfficeStoryState(story.storyId);
+            if (story.requiredAction == OfficeActionType.Celebrate)
+            {
+                brain.RecordOfficeStoryVisit(story.storyId, actor?.AgentId);
+                state = brain.GetOfficeStoryState(story.storyId);
+                if (!AllWorkersVisited(state))
+                    return;
+            }
+            else if (state != null
+                && !string.IsNullOrWhiteSpace(state.actorAgentId)
+                && actor != null && !string.Equals(state.actorAgentId,
+                    actor.AgentId, StringComparison.OrdinalIgnoreCase))
+                continue;
             brain.RecordOfficeStoryResolved(story.storyId);
-            brain.RememberWorldEvent(StoryResolutionMarker(story)
-                + " by " + (actor != null ? actor.DisplayName : "an agent"));
+            string resolution = !string.IsNullOrWhiteSpace(
+                    story.resolutionMemory)
+                ? Expand(story.resolutionMemory, actor, actor)
+                : story.title + " was resolved by "
+                    + (actor != null ? actor.DisplayName : "an agent") + ".";
+            if (story.officeWideKnowledge)
+                brain.RememberWorldEvent(StoryResolutionMarker(story) + " "
+                    + resolution);
+            if (actor != null)
+                brain.Remember(actor.AgentId, resolution);
+            OfficeInteractionHubClient.Instance?.RecordWorldEvent(
+                "office_story_resolved", story.title, resolution,
+                actor != null ? actor.AgentId : "");
+            UpdateStoryVisual(story, 3);
             Debug.Log("[Office event resolved] " + story.title
                 + " by " + (actor != null ? actor.DisplayName : "an agent"), this);
             return;
         }
+    }
+
+    private bool AllWorkersVisited(PersistedOfficeStoryState state)
+    {
+        if (state?.visitorAgentIds == null)
+            return false;
+        foreach (AIWorkerAgent worker in workers)
+            if (worker != null && !HasVisited(state, worker.AgentId))
+                return false;
+        return workers.Count > 0;
+    }
+
+    private static bool HasVisited(PersistedOfficeStoryState state,
+        string agentId)
+    {
+        if (state?.visitorAgentIds == null
+            || string.IsNullOrWhiteSpace(agentId))
+            return false;
+        foreach (string visitor in state.visitorAgentIds)
+            if (string.Equals(visitor, agentId,
+                    StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
     }
 
     private static bool HasUnresolvedStoryOccurrence(OfficeStoryBeatSO story)
@@ -1082,15 +1223,17 @@ public class OfficeEventDirector : MonoBehaviour
     {
         List<OfficeStoryBeatSO> candidates = new();
         foreach (OfficeStoryBeatSO story in ambientStories)
-            if (story != null && !WasRecentlyUsed(story, true))
+            if (IsVisualStory(story) && !WasStartedToday(story)
+                && !WasRecentlyUsed(story, true))
                 candidates.Add(story);
         if (candidates.Count == 0)
             foreach (OfficeStoryBeatSO story in ambientStories)
-                if (story != null && !WasRecentlyUsed(story, false))
+                if (IsVisualStory(story) && !WasStartedToday(story)
+                    && !WasRecentlyUsed(story, false))
                     candidates.Add(story);
         if (candidates.Count == 0)
             foreach (OfficeStoryBeatSO story in ambientStories)
-                if (story != null)
+                if (IsVisualStory(story) && !WasStartedToday(story))
                     candidates.Add(story);
 
         float total = 0f;
@@ -1107,6 +1250,37 @@ public class OfficeEventDirector : MonoBehaviour
                 return story;
         }
         return candidates[candidates.Count - 1];
+    }
+
+    private static bool WasStartedToday(OfficeStoryBeatSO story)
+    {
+        LLMBrainService brain = LLMBrainService.Instance;
+        PersistedOfficeStoryState state =
+            brain?.GetOfficeStoryState(story?.storyId);
+        return state != null && !string.IsNullOrWhiteSpace(
+                state.startedCalendarDate)
+            && string.Equals(state.startedCalendarDate,
+                brain.WorldDateTime.ToString("yyyy-MM-dd"),
+                StringComparison.Ordinal);
+    }
+
+    private static bool IsVisualStory(OfficeStoryBeatSO story)
+    {
+        return story != null && story.requiresAction
+            && (IsPrinterStory(story)
+                || (OfficeStoryWorldController.Instance != null
+                    && OfficeStoryWorldController.Instance.SupportsStory(
+                        story.storyId)));
+    }
+
+    private bool HasUnresolvedMajorStory()
+    {
+        if (ambientStories == null)
+            return false;
+        foreach (OfficeStoryBeatSO story in ambientStories)
+            if (IsVisualStory(story) && HasUnresolvedStoryOccurrence(story))
+                return true;
+        return false;
     }
 
     private static AIWorkerAgent PickStorySpeaker(List<AIWorkerAgent> candidates, string topic)
@@ -1161,6 +1335,10 @@ public class OfficeEventDirector : MonoBehaviour
         LLMBrainService brain = LLMBrainService.Instance;
         if (brain == null)
             return false;
+        PersistedOfficeStoryState state =
+            brain.GetOfficeStoryState(story.storyId);
+        if (includeWorldHistory && state != null && state.started > 0)
+            return true;
         foreach (string worldEvent in brain.WorldEvents)
             if (!string.IsNullOrWhiteSpace(worldEvent)
                 && worldEvent.StartsWith(story.title + ":",
@@ -1213,6 +1391,9 @@ public class OfficeEventDirector : MonoBehaviour
         LLMBrainService.Instance?.RememberWorldEvent(birthdayDescription);
         VendingEventDispatcher.Instance?.ShowWorldAnnouncement(
             birthdayTitle, birthdayDescription, null, 3.5f);
+        OfficeInteractionHubClient.Instance?.RecordWorldEvent(
+            "birthday", birthdayTitle, birthdayDescription,
+            birthdayWorker.AgentId);
         ApplyBirthdayGift(birthdayWorker, TryPrepareBirthdayGift(birthdayWorker));
         PrioritizeFreshWorldContext();
     }
@@ -1252,11 +1433,15 @@ public class OfficeEventDirector : MonoBehaviour
 
     private static void UpdateStoryVisual(OfficeStoryBeatSO story, int stage)
     {
-        if (!IsPrinterStory(story))
+        if (story == null)
             return;
-        OfficePrinterController printer =
-            FindFirstObjectByType<OfficePrinterController>();
-        printer?.SetStoryStage(stage);
+        OfficeStoryWorldController.Instance?.ShowStage(story.storyId, stage);
+        if (IsPrinterStory(story))
+        {
+            OfficePrinterController printer =
+                FindFirstObjectByType<OfficePrinterController>();
+            printer?.SetStoryStage(stage >= 3 ? 2 : 0);
+        }
     }
 
     private BirthdayGift TryPrepareBirthdayGift(AIWorkerAgent birthdayWorker)
@@ -1296,6 +1481,10 @@ public class OfficeEventDirector : MonoBehaviour
             "Birthday Gift", birthdayWorker.DisplayName + " got a new hat.", gift.hat.sprite, 2.5f);
         LLMBrainService.Instance?.RememberWorldEvent(
             birthdayWorker.DisplayName + " received a hat as a birthday gift.");
+        OfficeInteractionHubClient.Instance?.RecordWorldEvent(
+            "birthday_gift", "Birthday Gift",
+            birthdayWorker.DisplayName + " received a birthday gift.",
+            birthdayWorker.AgentId);
     }
 
     private enum BirthdayGiftKind

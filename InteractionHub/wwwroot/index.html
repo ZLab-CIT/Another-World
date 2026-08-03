@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Another World Office</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>.reward img{display:block;width:150px;height:150px;margin:12px auto}#archive article{padding:10px 0;border-bottom:1px solid var(--soft)}</style>
+</head>
+<body>
+  <main>
+    <header><span class="eyebrow">LIVE FROM THE TERRARIUM</span><h1>Another World Office</h1><p id="identity">Connecting...</p></header>
+    <section id="profile" class="card profile">
+      <h2>How should the office know you?</h2>
+      <input id="alias" maxlength="24" placeholder="Optional alias">
+      <label><input id="publicAlias" type="checkbox"> Characters may say this alias on the shared screen</label>
+      <button id="register">Enter the office</button>
+    </section>
+    <button id="forget" class="hidden">Forget this browser identity</button>
+    <section id="decisionIdle" class="card"><span class="eyebrow">NO OPEN QUESTION</span><h2>The characters are deciding what to ask</h2><p>A choice appears here only when a character opens a three-minute office vote. Keep this page open; it updates automatically.</p></section>
+    <section id="decision" class="card hidden"><span class="eyebrow" id="author"></span><h2 id="question"></h2><div id="options"></div><p id="timer"></p></section>
+    <section id="reward" class="card reward hidden"><span class="eyebrow">CHARACTER SURPRISE</span><h2 id="rewardName"></h2><img id="rewardQr" alt="Prototype reward QR"><div id="rewardCode"></div><strong>Prototype only, not redeemable</strong></section>
+    <section id="newspaper" class="paper hidden"><span class="eyebrow" id="paperDate"></span><h2 id="headline"></h2><p id="summary"></p><div id="stories"></div><blockquote id="quote"></blockquote><p id="decisionResult"></p><p id="visitorThanks"></p><footer id="teaser"></footer></section>
+    <details class="card"><summary>Past editions</summary><div id="archive"></div></details>
+    <details class="card"><summary>Send appreciation to a colleague</summary><p>A character can deliver a structured note. The recipient must first register on another phone or browser and enable a public alias.</p><p id="appreciationStatus"></p><select id="recipient"></select><select id="category"><option value="help">Help</option><option value="kindness">Kindness</option><option value="teamwork">Teamwork</option><option value="creativity">Creativity</option><option value="welcome">A warm welcome</option></select><select id="courier"><option value="linli">Linli</option><option value="mingyun">Mingyun</option><option value="xiaomei">Xiaomei</option><option value="xiaoxia">XiaoXia</option><option value="pengpeng">Pengpeng</option><option value="dianmei">DianMei</option></select><label><input id="publicNote" type="checkbox"> This acknowledgement may appear publicly</label><button id="appreciate" disabled>Send through the character</button></details>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -17,7 +17,10 @@ public enum OfficeActionType
     Think,
     CheckPhone,
     ApproachColleague,
-    Custom
+    Custom,
+    InspectPackage,
+    RepairWifi,
+    Celebrate
 }
 
 public enum OfficeFacingDirection
@@ -133,9 +136,9 @@ public class OfficeActionPoint : MonoBehaviour
                 GetComponentInParent<OfficePrinterController>()
                 ?? FindFirstObjectByType<OfficePrinterController>();
             printer?.SetStoryStage(2);
-            OfficeEventDirector.Instance?.NotifyStoryActionCompleted(
-                actionType, agent);
         }
+        OfficeEventDirector.Instance?.NotifyStoryActionCompleted(
+            actionType, agent);
     }
 
     public Transform GetItemPlacementTransform()

@@ -19,5 +19,11 @@ MonoBehaviour:
   topic: the office connection dropped briefly during an important upload
   memory: '{speaker} and {target} experienced a brief office network outage.'
   publicAnnouncement: 1
-  followUpDelaySeconds: 60
-  followUpMemory: '{speaker} and {target} confirmed the connection was stable again.'
+  officeWideKnowledge: 1
+  requiresAction: 1
+  requiredAction: 16
+  preferredActorAgentId:
+  actionDurationSeconds: 7
+  participantCount: 2
+  noticedSeconds: 4
+  resolutionMemory: '{speaker} restored the office connection and confirmed it was stable.'

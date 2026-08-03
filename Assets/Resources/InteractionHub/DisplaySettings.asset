@@ -1,0 +1,23 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dcb4b7af53b54fe6aa938dc5611c88ef, type: 3}
+  m_Name: DisplaySettings
+  m_EditorClassIdentifier: 
+  corner: 0
+  margin: {x: 24, y: 24}
+  panelSize: {x: 470, y: 158}
+  qrSize: {x: 124, y: 124}
+  eyebrowFontSize: 14
+  titleFontSize: 25
+  bodyFontSize: 15
+  scale: 1
+  canvasSortingOrder: 900

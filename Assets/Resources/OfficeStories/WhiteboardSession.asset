@@ -10,20 +10,20 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: e10768b32f9e47d69dd709141a1266f3, type: 3}
-  m_Name: UnexpectedPackage
+  m_Name: WhiteboardSession
   m_EditorClassIdentifier:
-  storyId: unexpected_package
-  title: An Unclaimed Package
-  kind: 2
-  weight: 1
-  topic: a delivery arrived with the office address but no recipient name
-  memory: '{speaker} and {target} noticed an unclaimed package in the office.'
+  storyId: whiteboard_session
+  title: Whiteboard Session
+  kind: 3
+  weight: 1.1
+  topic: the team needs to turn a confusing research problem into a clear plan
+  memory: '{speaker}, {target}, and their coworkers started mapping a difficult problem on the whiteboard.'
   publicAnnouncement: 1
   officeWideKnowledge: 0
   requiresAction: 1
-  requiredAction: 15
+  requiredAction: 8
   preferredActorAgentId:
-  actionDurationSeconds: 6
+  actionDurationSeconds: 8
   participantCount: 3
   noticedSeconds: 4
-  resolutionMemory: '{speaker} opened the package and confirmed what was inside.'
+  resolutionMemory: '{speaker} helped the team finish a concrete whiteboard plan.'

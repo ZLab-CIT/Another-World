@@ -9,6 +9,9 @@
 /[Ll]ibrary/
 /[Tt]emp/
 /[Oo]bj/
+**/[Bb]in/
+**/[Oo]bj/
+/InteractionHub/Data/
 /[Bb]uild/
 /[Bb]uilds/
 /[Ll]ogs/
@@ -44,6 +47,7 @@
 ExportedObj/
 .consulo/
 *.csproj
+!/InteractionHub/InteractionHub.csproj
 *.unityproj
 *.sln
 *.slnx

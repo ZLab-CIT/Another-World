@@ -34,6 +34,15 @@ rotating provider pool with transport retries and per-provider circuit
 breakers. If generation is unavailable, utility movement and physical
 interactions continue while model-authored narrative pauses.
 
+Physical prop stories run at most once per real calendar day and stop when the
+day's eligible set is exhausted rather than cycling. Ongoing variety comes from
+model-authored soft situations grounded in biography, interests, opinions,
+personal history, plans, humor, uncertainty, and relationships. Episode
+validation rejects inactive prop discussions, unsupported food/drink favors,
+and repeated work-completion themes. Successful topics and utterances are
+persisted as novelty history, while ordinary episode summaries stay in the
+participants' memories instead of becoming self-reinforcing global facts.
+
 Optional data-driven story definitions live in
 `Assets/Resources/OfficeStories`. They contain premises, facts, weights,
 and privacy rather than authored dialogue. The current
@@ -43,6 +52,34 @@ package, a Wi-Fi interruption, and a small office victory. This ambient-story
 layer is active alongside the episode director. A new event is announced,
 written to shared memory, and causes the next generated pack to react to it
 instead of waiting behind stale buffered scenes.
+
+Random headline events now use staged physical presentation rather than
+text-only announcements. The printer, whiteboard, package, Wi-Fi router, and
+office-victory cake visibly move through noticed, in-progress, resolved, and
+aftermath states. Two to four workers gather at reserved slots, the designated
+actor completes the event, and the prop state recovers from the persisted
+snapshot. These sequences do not require an LLM.
+
+Story props prefer scene-authored `OfficeStoryPropAnchor` components over the
+catalog's fallback coordinates. Use `whiteboard_session` and `wifi_blip` for
+the fixed board and router, `tiny_win` for a table-only cake location, and
+`unexpected_package` for one or more safe floor/table locations. Multiple
+package anchors are used in stable rotation between occurrences. Board and
+router entries have idle sprites and remain visible between events; package
+and cake entries remain hidden until their story starts. Anchor sorting-order
+overrides can keep table props in front of the correct furniture.
+
+Story knowledge is witness-scoped by default. A transient UI announcement does
+not make its subject common knowledge: only participating agents receive the
+memory, and the episode prompt prevents other workers from using that private
+fact until a witness tells them. Stories such as a whole-office Wi-Fi outage
+can opt into immediate office-wide knowledge. Celebration visits are persisted
+per worker; the cake is removed only after every registered worker has visited
+once. Packages are removed immediately when their inspection resolves.
+
+The accelerated office schedule preserves simulated time-of-day, while weekday,
+date, birthdays, and holiday context use the real local calendar. Restoring an
+older snapshot therefore cannot leave agents believing it is a previous day.
 
 The runtime holiday calendar adds nearby Chinese lunar holidays and common
 international holidays to the compact time context. It is calculated locally,
@@ -189,6 +226,50 @@ A production deployment still needs:
    accepted-event callback, and mock triggers, but there is no authenticated
    webhook receiver, durable event queue, WebSocket/SSE distribution, client
    acknowledgement, or server-side deduplication yet.
+
+## Visitor Interaction Hub
+
+The optional `.NET 8` `InteractionHub` closes the virtual-to-physical loop on
+an office LAN. It provides a phone web page, opt-in returning aliases,
+three-minute character polls, structured colleague appreciation, prototype
+story-contributor rewards, and a daily newspaper archive. SQLite WAL storage
+keeps visitor and vote state separate from the Unity save.
+
+Start it before entering Play mode:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Tools\Start-InteractionHub.ps1
+```
+
+Unity creates its QR/newspaper panel automatically and connects through
+`http://127.0.0.1:5074`. Phones scan the LAN address shown by the script and
+must be connected to the same network. If Windows Firewall asks, allow access
+on private networks only. Use `-Background` for unattended launches.
+
+Edit `Assets/Resources/InteractionHub/DisplaySettings.asset` to change the QR
+tile corner, screen margin, panel size, QR size, overall scale, or canvas
+sorting order. Eyebrow, title, and body font sizes are configurable in the same
+asset. These values refresh during Play mode, so scene editing is not required.
+
+The phone page shows an explicit waiting card when no character vote is open.
+Appreciation requires two registered browser identities: the recipient must
+enable their public alias before the sender can select them. Custom text is not
+accepted.
+
+To test voting immediately, enter Play mode and choose `Another World >
+Interaction Hub > Publish Test Decision` from the Unity menu. This publishes a
+clearly test-only poll; press `F8` as a shortcut. Normal runtime decisions still
+come from the LLM.
+
+Audience decisions do not add a separate routine model call. When the
+20-to-40-minute decision window is due, the next normal episode pack includes
+one validated question and its possible consequences. The daily newspaper uses
+at most one compact request after 18:00; a local summary is stored if generation
+is unavailable. Unity persists an event outbox and continues the simulation
+when the hub is stopped.
+
+Prototype reward pages and QR codes are deliberately marked non-redeemable.
+No vending payment, face recognition, office badge, or real coupon API is used.
 
 ## Validation
 

@@ -1004,6 +1004,23 @@ public class AIWorkerAgent : MonoBehaviour
         return false;
     }
 
+    public bool HasSequenceWithPrefix(string prefix)
+    {
+        if (string.IsNullOrWhiteSpace(prefix))
+            return false;
+        if (currentActivity != null
+            && !string.IsNullOrWhiteSpace(currentActivity.sequenceId)
+            && currentActivity.sequenceId.StartsWith(prefix,
+                System.StringComparison.OrdinalIgnoreCase))
+            return true;
+        foreach (OfficeActivityPlan queued in plannedActivities)
+            if (queued != null && !string.IsNullOrWhiteSpace(queued.sequenceId)
+                && queued.sequenceId.StartsWith(prefix,
+                    System.StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
+    }
+
     public bool StartPreparedPhoneCall(List<string> lines, string reason)
     {
         if (lines == null || lines.Count == 0 || conversation == null
@@ -1247,7 +1264,8 @@ public class AIWorkerAgent : MonoBehaviour
         float bestScore = float.MinValue;
         foreach (OfficeActionPoint actionPoint in actionPoints)
         {
-            if (actionPoint == null || actionPoint.actionType != actionType)
+            if (actionPoint == null || !actionPoint.isActiveAndEnabled
+                || actionPoint.actionType != actionType)
                 continue;
             if (actionPoint.actionType == OfficeActionType.WorkDesk &&
                 assignedDesk != null && actionPoint != assignedDesk)
@@ -1307,6 +1325,9 @@ public class AIWorkerAgent : MonoBehaviour
             case OfficeActionType.Think: return "pause to think";
             case OfficeActionType.CheckPhone: return "check your phone";
             case OfficeActionType.ApproachColleague: return "approach a colleague";
+            case OfficeActionType.InspectPackage: return "inspect the package";
+            case OfficeActionType.RepairWifi: return "check the Wi-Fi router";
+            case OfficeActionType.Celebrate: return "celebrate with coworkers";
             default: return type.ToString();
         }
     }
@@ -1549,6 +1570,7 @@ public class AIWorkerAgent : MonoBehaviour
                     phoneCall: true, showIncomingStatus: true));
             }
         }
+        ShowPhysicalStoryEmotion(startedType);
 
         if (currentActivity?.actionPoint != null)
         {
@@ -1568,6 +1590,23 @@ public class AIWorkerAgent : MonoBehaviour
         }
 
         conversation.OnStartedActing(currentActivity?.actionPoint);
+    }
+
+    private void ShowPhysicalStoryEmotion(OfficeActionType actionType)
+    {
+        AgentEmotion? emotion = actionType switch
+        {
+            OfficeActionType.Whiteboard => AgentEmotion.Cool,
+            OfficeActionType.InspectPackage => AgentEmotion.Surprised,
+            OfficeActionType.RepairWifi => AgentEmotion.Confused,
+            OfficeActionType.Celebrate => AgentEmotion.Happy,
+            _ => null
+        };
+        if (!emotion.HasValue)
+            return;
+        currentEmotion = emotion.Value;
+        emotionHoldUntil = Time.time + Mathf.Max(5f, stateTimer);
+        emotionDisplay?.SetEmotion(currentEmotion);
     }
 
     public void ExtendActing(float seconds)

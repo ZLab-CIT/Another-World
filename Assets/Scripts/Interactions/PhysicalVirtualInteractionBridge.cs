@@ -117,6 +117,9 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
             + physicalEvent.eventId);
         dispatcher.TriggerEvent(evt);
         PhysicalEventAccepted?.Invoke(physicalEvent, evt);
+        OfficeInteractionHubClient.Instance?.RecordWorldEvent(
+            "physical_vending", evt.displayName,
+            evt.description, Array.Empty<string>());
 
         if (evt.interactionDirection == InteractionDirection.Bidirectional)
             IssueCouponFromEvent(physicalEvent.userId, evt);

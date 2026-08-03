@@ -6,7 +6,7 @@ using UnityEngine;
 [Serializable]
 public sealed class WorldStateSnapshot
 {
-    public int version = 5;
+    public int version = 8;
     public string savedAtUtc;
     public double worldUnixSeconds;
     public List<PersistedAgentState> agents = new();
@@ -14,6 +14,8 @@ public sealed class WorldStateSnapshot
     public List<AgentRelationshipState> relationships = new();
     public List<OfficeEpisodeBeat> episodeReserve = new();
     public List<string> worldEvents = new();
+    public List<string> recentNarrativeTopics = new();
+    public List<string> recentNarrativeUtterances = new();
     public List<PersistedOfficeStoryState> officeStories = new();
     public List<PersistedFurnitureState> furniture = new();
 }
@@ -24,6 +26,12 @@ public sealed class PersistedOfficeStoryState
     public string storyId;
     public int started;
     public int resolved;
+    public int visualStage;
+    public double stageChangedWorldTime;
+    public string actorAgentId;
+    public List<string> participantAgentIds = new();
+    public List<string> visitorAgentIds = new();
+    public string startedCalendarDate;
 }
 
 [Serializable]
@@ -111,7 +119,9 @@ public static class WorldStateStore
         IEnumerable<AgentRelationshipState> relationships,
         IEnumerable<OfficeEpisodeBeat> episodeReserve,
         IEnumerable<PersistedOfficeStoryState> officeStories,
-        IEnumerable<PersistedFurnitureState> furniture)
+        IEnumerable<PersistedFurnitureState> furniture,
+        List<string> recentNarrativeTopics,
+        List<string> recentNarrativeUtterances)
     {
         WorldStateSnapshot snapshot = new()
         {
@@ -122,7 +132,9 @@ public static class WorldStateStore
             relationships = CopyRelationships(relationships),
             episodeReserve = CopyEpisodeReserve(episodeReserve),
             officeStories = CopyOfficeStories(officeStories),
-            furniture = CopyFurniture(furniture)
+            furniture = CopyFurniture(furniture),
+            recentNarrativeTopics = Copy(recentNarrativeTopics),
+            recentNarrativeUtterances = Copy(recentNarrativeUtterances)
         };
 
         HashSet<string> savedAgentIds = new(StringComparer.OrdinalIgnoreCase);
@@ -174,7 +186,17 @@ public static class WorldStateStore
                 {
                     storyId = state.storyId,
                     started = Mathf.Max(0, state.started),
-                    resolved = Mathf.Max(0, state.resolved)
+                    resolved = Mathf.Max(0, state.resolved),
+                    visualStage = Mathf.Clamp(state.visualStage, 0, 4),
+                    stageChangedWorldTime = Math.Max(0d, state.stageChangedWorldTime),
+                    actorAgentId = state.actorAgentId,
+                    participantAgentIds = state.participantAgentIds != null
+                        ? new List<string>(state.participantAgentIds)
+                        : new List<string>(),
+                    visitorAgentIds = state.visitorAgentIds != null
+                        ? new List<string>(state.visitorAgentIds)
+                        : new List<string>(),
+                    startedCalendarDate = state.startedCalendarDate
                 });
         return result;
     }
