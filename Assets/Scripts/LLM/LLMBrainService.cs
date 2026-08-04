@@ -232,7 +232,7 @@ public class LLMBrainService : MonoBehaviour
     [SerializeField, Min(15f)] private float stateSaveIntervalSeconds = 60f;
     [Tooltip("How many simulated minutes pass per real minute.")]
     [SerializeField, Range(1f, 60f)] private float simulationTimeScale = 4f;
-    [Tooltip("Maximum simulated time applied after the application was offline.")]
+    [Tooltip("Maximum offline catch-up applied to saved agent needs and temporary buffs. This does not advance the startup clock.")]
     [SerializeField, Range(0f, 24f)] private float maximumOfflineCatchUpHours = 8f;
 
     [Header("Agent Personalities")]
@@ -267,6 +267,7 @@ public class LLMBrainService : MonoBehaviour
     private int nextEpisodeBackendIndex;
     private int nextConversationBackendIndex;
     private List<OfficeEpisodeBeat> persistedEpisodeReserve = new();
+    private bool startedOnNewCalendarDay;
 
     private LLMConversationPlanner conversationPlanner;
     private OfficeEpisodePlanner episodePlanner;
@@ -1048,8 +1049,14 @@ public class LLMBrainService : MonoBehaviour
     private void RestoreSimulationState()
     {
         double realNow = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        worldUnixSeconds = persistedState != null && persistedState.worldUnixSeconds > 0d
-            ? persistedState.worldUnixSeconds : realNow;
+        double restoredWorldTime = persistedState != null
+            && persistedState.worldUnixSeconds > 0d
+                ? persistedState.worldUnixSeconds : realNow;
+        double worldTimeShift = realNow - restoredWorldTime;
+        // A fresh process always starts from the computer clock. Rebase saved
+        // world timestamps below so accelerated play from a previous run cannot
+        // make a morning restart believe it is still evening.
+        worldUnixSeconds = realNow;
         Replace(recentGlobalTopics,
             persistedState?.recentNarrativeTopics, 24);
         Replace(recentGlobalUtterances,
@@ -1059,18 +1066,27 @@ public class LLMBrainService : MonoBehaviour
                 CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind,
                 out DateTime savedAtUtc))
         {
-            double realOfflineSeconds = Math.Max(0d,
-                (DateTime.UtcNow - savedAtUtc.ToUniversalTime()).TotalSeconds);
-            double simulatedOfflineSeconds = realOfflineSeconds
-                * Mathf.Max(1f, simulationTimeScale);
-            worldUnixSeconds += Math.Min(simulatedOfflineSeconds,
-                Mathf.Max(0f, maximumOfflineCatchUpHours) * 3600d);
+            startedOnNewCalendarDay = savedAtUtc.ToLocalTime().Date
+                != DateTime.Now.Date;
+        }
+
+        if (startedOnNewCalendarDay)
+        {
+            recentGlobalTopics.Clear();
+            recentGlobalUtterances.Clear();
         }
 
         if (persistedState?.agentRuntime != null)
             foreach (PersistedAgentRuntimeState state in persistedState.agentRuntime)
                 if (state != null && !string.IsNullOrWhiteSpace(state.agentId))
+                {
+                    if (startedOnNewCalendarDay)
+                    {
+                        state.lastAction = "";
+                        state.activeGoal = "";
+                    }
                     runtimeStates[state.agentId] = state;
+                }
 
         if (persistedState?.relationships != null)
             foreach (AgentRelationshipState relationship in persistedState.relationships)
@@ -1078,6 +1094,8 @@ public class LLMBrainService : MonoBehaviour
                 {
                     if (IsStaleSnackMystery(relationship.lastEvent))
                         relationship.lastEvent = "ordinary office conversation";
+                    if (relationship.lastInteractionWorldTime > 0d)
+                        relationship.lastInteractionWorldTime += worldTimeShift;
                     relationships[RelationshipKey(
                         relationship.firstAgentId, relationship.secondAgentId)] = relationship;
                 }
@@ -1089,6 +1107,15 @@ public class LLMBrainService : MonoBehaviour
                 {
                     story.participantAgentIds ??= new List<string>();
                     story.visitorAgentIds ??= new List<string>();
+                    if (story.stageChangedWorldTime > 0d)
+                    {
+                        bool resolvedAftermath = story.started > 0
+                            && story.resolved >= story.started;
+                        story.stageChangedWorldTime = startedOnNewCalendarDay
+                            && resolvedAftermath
+                                ? realNow - 86400d
+                                : story.stageChangedWorldTime + worldTimeShift;
+                    }
                     if (string.IsNullOrWhiteSpace(story.startedCalendarDate)
                         && story.started > 0)
                         story.startedCalendarDate = WorldDateTime.ToString(
@@ -1111,7 +1138,8 @@ public class LLMBrainService : MonoBehaviour
         persistedEpisodeReserve = persistedState?.episodeReserve != null
             ? new List<OfficeEpisodeBeat>(persistedState.episodeReserve)
             : new List<OfficeEpisodeBeat>();
-        if (persistedState != null && persistedState.version < 8)
+        if (startedOnNewCalendarDay
+            || (persistedState != null && persistedState.version < 8))
             persistedEpisodeReserve.Clear();
         persistedEpisodeReserve.RemoveAll(beat =>
             !HasEpisodeThought(beat) || IsStaleSnackMysteryBeat(beat));
@@ -1140,6 +1168,12 @@ public class LLMBrainService : MonoBehaviour
         Replace(profile.recentTopics, saved.recentTopics, 8);
         Replace(profile.recentOpenings, saved.recentOpenings, 8);
         Replace(profile.recentUtterances, saved.recentUtterances, 10);
+        if (startedOnNewCalendarDay)
+        {
+            profile.recentTopics.Clear();
+            profile.recentOpenings.Clear();
+            profile.recentUtterances.Clear();
+        }
         profile.memory.RemoveAll(IsStaleSnackMystery);
         if (persistedState.version < 7)
             profile.memory.RemoveAll(IsLegacyPackageKnowledge);

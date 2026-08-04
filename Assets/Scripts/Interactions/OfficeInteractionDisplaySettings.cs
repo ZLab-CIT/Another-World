@@ -12,6 +12,11 @@ public enum InteractionDisplayCorner
     fileName = "InteractionHubDisplaySettings")]
 public sealed class OfficeInteractionDisplaySettings : ScriptableObject
 {
+    [Header("Prefab")]
+    [Tooltip("Optional authored UI prefab. Its root must have OfficeInteractionDisplayView. Leave empty to use the generated tile.")]
+    public OfficeInteractionDisplayView panelPrefab;
+
+    [Header("Placement")]
     [Tooltip("Screen corner used as the tile's anchor.")]
     public InteractionDisplayCorner corner = InteractionDisplayCorner.TopLeft;
     [Tooltip("Distance from the selected corner in screen pixels.")]

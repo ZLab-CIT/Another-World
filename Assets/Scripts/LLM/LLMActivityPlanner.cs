@@ -60,6 +60,8 @@ public sealed class OfficeEpisodePlanner
                 + "assistant language, repeated catchphrases, or numeric stat readouts. "
                 + "Vary dialogue length naturally: most lines use 5-12 words and no line exceeds 18. "
                 + "Match the visible mood; use anger only for genuine conflict. "
+                + "The Time line in Office context is authoritative. Treat remembered times "
+                + "as historical and never replace the current weekday or time of day with them. "
                 + "A phone beat is an incoming call from someone outside the office and has one "
                 + "person with 2-3 one-sided lines; never address a listed coworker. Actions with timing before "
                 + "happen before dialogue; actions with timing after happen after it. If a line "

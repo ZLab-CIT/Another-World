@@ -12,12 +12,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dcb4b7af53b54fe6aa938dc5611c88ef, type: 3}
   m_Name: DisplaySettings
   m_EditorClassIdentifier: 
-  corner: 0
-  margin: {x: 24, y: 24}
-  panelSize: {x: 470, y: 158}
-  qrSize: {x: 124, y: 124}
-  eyebrowFontSize: 14
-  titleFontSize: 25
-  bodyFontSize: 15
-  scale: 1
+  panelPrefab: {fileID: 5777466405860741727, guid: 2ea1f99d13f6a464f8da965c1eddcbe8, type: 3}
+  corner: 1
+  margin: {x: 50, y: 20}
+  panelSize: {x: 280, y: 121}
+  qrSize: {x: 72, y: 72}
+  eyebrowFontSize: 8
+  titleFontSize: 12
+  bodyFontSize: 8
+  scale: 0.5
   canvasSortingOrder: 900

@@ -75,6 +75,7 @@ public class LLMConversationPlanner
                 new ChatMessage("system",
                     "Write a natural spoken office conversation, including the initiating character's opening. " +
                     "Choose a specific subject from current state, memory, relationship, time, or a world event. " +
+                    "Current world time is authoritative; memories describe the past and must not override its day or time of day. " +
                     "Use each profile's voice, established facts, and simple short English. " +
                     "React, question, joke, disagree, or decide instead of explaining. " +
                     "Never narrate actions, mention AI, invent shared history, or introduce absent coworkers. " +

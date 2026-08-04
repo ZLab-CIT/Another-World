@@ -37,7 +37,8 @@ app.MapGet("/api/state", (HttpRequest http, HubStore store) =>
             ? store.GetVisitorVote(activeDecision.DecisionId, visitor.VisitorId) : "",
         LatestNewspaper = store.GetLatestNewspaper(),
         Visitor = visitor,
-        Rewards = visitor == null ? [] : store.GetRewards(visitor.VisitorId)
+        Rewards = visitor == null ? [] : store.GetRewards(visitor.VisitorId),
+        ClaimableReward = store.GetActiveClaimableReward()
     });
 });
 
@@ -59,6 +60,13 @@ app.MapPost("/api/appreciation", (HttpRequest http, AppreciationRequest request,
 
 app.MapGet("/api/visitors/public", (HubStore store) => Results.Ok(
     store.GetPublicVisitors().Select(value => new { visitorId = value.id, displayName = value.name })));
+
+app.MapPost("/api/rewards/{code}/claim", (string code, HttpRequest http, HubStore store) =>
+{
+    string? token = VisitorToken(http);
+    if (string.IsNullOrWhiteSpace(token)) return Results.Unauthorized();
+    return store.ClaimReward(token, code) ? Results.Accepted() : Results.Conflict();
+});
 
 app.MapGet("/api/newspapers", (HubStore store) => Results.Ok(store.GetNewspaperArchive()));
 
@@ -115,7 +123,8 @@ app.MapGet("/api/unity/state", (long? after, HttpRequest http, HubStore store) =
         ActiveDecision = store.GetActiveDecision(),
         LatestNewspaper = store.GetLatestNewspaper(),
         NewspaperNeededDate = store.NewspaperNeededDate(),
-        Events = events
+        Events = events,
+        ClaimableReward = store.GetActiveClaimableReward()
     });
 });
 
@@ -133,6 +142,13 @@ app.MapPost("/api/unity/events", (HttpRequest http, UnityEventRequest request, H
     if (string.IsNullOrWhiteSpace(request.EventId) || string.IsNullOrWhiteSpace(request.Detail))
         return Results.BadRequest();
     return store.AddUnityEvent(request) ? Results.Accepted() : Results.Ok();
+});
+
+app.MapPost("/api/unity/rewards", (HttpRequest http, RewardIssueRequest request, HubStore store) =>
+{
+    if (!IsUnityAuthorized(http)) return Results.Unauthorized();
+    RewardView? reward = store.IssueClaimableReward(request);
+    return reward == null ? Results.BadRequest() : Results.Ok(reward);
 });
 
 app.MapPost("/api/unity/newspapers", (HttpRequest http, NewspaperRequest request, HubStore store) =>

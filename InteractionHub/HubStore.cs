@@ -65,6 +65,30 @@ public sealed class HubStore
               date TEXT PRIMARY KEY, content_json TEXT NOT NULL, created_at INTEGER NOT NULL);
             """;
         command.ExecuteNonQuery();
+        EnsureColumn(db, "rewards", "expires_at", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(db, "rewards", "claimed_at", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(db, "rewards", "description", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(db, "rewards", "source_key", "TEXT NOT NULL DEFAULT ''");
+        using SqliteCommand index = db.CreateCommand();
+        index.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS rewards_source_key ON rewards(source_key) WHERE source_key<>''";
+        index.ExecuteNonQuery();
+    }
+
+    private static void EnsureColumn(SqliteConnection db, string table,
+        string column, string definition)
+    {
+        using SqliteCommand inspect = db.CreateCommand();
+        inspect.CommandText = "PRAGMA table_info(" + table + ")";
+        using SqliteDataReader reader = inspect.ExecuteReader();
+        while (reader.Read())
+            if (string.Equals(reader.GetString(1), column,
+                    StringComparison.OrdinalIgnoreCase))
+                return;
+        reader.Close();
+        using SqliteCommand alter = db.CreateCommand();
+        alter.CommandText = "ALTER TABLE " + table + " ADD COLUMN "
+            + column + " " + definition;
+        alter.ExecuteNonQuery();
     }
 
     public VisitorSession Register(string? token, RegisterVisitorRequest request)
@@ -343,14 +367,16 @@ public sealed class HubStore
     {
         using SqliteConnection db = Open();
         using SqliteCommand command = db.CreateCommand();
-        command.CommandText = "SELECT id,code,display_name,issued_at FROM rewards WHERE visitor_id=$visitor ORDER BY issued_at DESC";
+        command.CommandText = "SELECT id,code,display_name,issued_at,expires_at,description FROM rewards WHERE visitor_id=$visitor ORDER BY issued_at DESC";
         command.Parameters.AddWithValue("$visitor", visitorId);
         using SqliteDataReader reader = command.ExecuteReader();
         List<RewardView> rewards = [];
         while (reader.Read()) rewards.Add(new RewardView
         {
             RewardId = reader.GetString(0), Code = reader.GetString(1), DisplayName = reader.GetString(2),
-            IssuedAtUnixMilliseconds = reader.GetInt64(3), PrototypeOnly = true
+            IssuedAtUnixMilliseconds = reader.GetInt64(3),
+            ExpiresAtUnixMilliseconds = reader.GetInt64(4),
+            Description = reader.GetString(5), Claimed = true, PrototypeOnly = true
         });
         return rewards.ToArray();
     }
@@ -359,16 +385,89 @@ public sealed class HubStore
     {
         using SqliteConnection db = Open();
         using SqliteCommand command = db.CreateCommand();
-        command.CommandText = "SELECT id,code,display_name,issued_at FROM rewards WHERE code=$code";
+        command.CommandText = "SELECT id,code,display_name,issued_at,expires_at,description,visitor_id FROM rewards WHERE code=$code";
         command.Parameters.AddWithValue("$code", code);
         using SqliteDataReader reader = command.ExecuteReader();
         return reader.Read() ? new RewardView
         {
             RewardId = reader.GetString(0), Code = reader.GetString(1),
             DisplayName = reader.GetString(2), IssuedAtUnixMilliseconds = reader.GetInt64(3),
-            PrototypeOnly = true
+            ExpiresAtUnixMilliseconds = reader.GetInt64(4), Description = reader.GetString(5),
+            Claimed = !string.IsNullOrWhiteSpace(reader.GetString(6)), PrototypeOnly = true
         } : null;
     }
+
+    public RewardView? GetActiveClaimableReward()
+    {
+        using SqliteConnection db = Open();
+        using SqliteCommand command = db.CreateCommand();
+        command.CommandText = "SELECT id,code,display_name,issued_at,expires_at,description FROM rewards WHERE visitor_id='' AND expires_at>$now ORDER BY issued_at DESC LIMIT 1";
+        command.Parameters.AddWithValue("$now", Now());
+        using SqliteDataReader reader = command.ExecuteReader();
+        return reader.Read() ? ReadClaimableReward(reader) : null;
+    }
+
+    public RewardView? IssueClaimableReward(RewardIssueRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.SourceEventId)
+            || string.IsNullOrWhiteSpace(request.DisplayName))
+            return null;
+        using SqliteConnection db = Open();
+        string source = CleanValue(request.SourceEventId, 96);
+        using SqliteCommand existing = db.CreateCommand();
+        existing.CommandText = "SELECT id,code,display_name,issued_at,expires_at,description,visitor_id FROM rewards WHERE source_key=$source";
+        existing.Parameters.AddWithValue("$source", source);
+        using (SqliteDataReader reader = existing.ExecuteReader())
+            if (reader.Read())
+                return string.IsNullOrWhiteSpace(reader.GetString(6))
+                    && reader.GetInt64(4) > Now()
+                        ? ReadClaimableReward(reader) : null;
+
+        long now = Now();
+        long expires = now + Math.Clamp(request.ClaimWindowSeconds, 60, 1800) * 1000L;
+        string id = Guid.NewGuid().ToString("N");
+        string code = "OFFICE-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(4));
+        using SqliteCommand insert = db.CreateCommand();
+        insert.CommandText = "INSERT INTO rewards(id,visitor_id,campaign,code,display_name,issued_at,expires_at,claimed_at,description,source_key) VALUES($id,'',$campaign,$code,$name,$now,$expires,0,$description,$source)";
+        insert.Parameters.AddWithValue("$id", id);
+        insert.Parameters.AddWithValue("$campaign", "claim-" + source);
+        insert.Parameters.AddWithValue("$code", code);
+        insert.Parameters.AddWithValue("$name", CleanValue(request.DisplayName, 64));
+        insert.Parameters.AddWithValue("$now", now);
+        insert.Parameters.AddWithValue("$expires", expires);
+        insert.Parameters.AddWithValue("$description", CleanValue(request.Description, 180));
+        insert.Parameters.AddWithValue("$source", source);
+        insert.ExecuteNonQuery();
+        AddEvent(db, "reward-available-" + id, "reward_available",
+            request.DisplayName, "A reward is available to claim for five minutes.", "", "", now);
+        return GetRewardByCode(code);
+    }
+
+    public bool ClaimReward(string token, string code)
+    {
+        using SqliteConnection db = Open();
+        VisitorSession? visitor = GetVisitorByToken(db, token);
+        if (visitor == null) return false;
+        long now = Now();
+        using SqliteCommand update = db.CreateCommand();
+        update.CommandText = "UPDATE rewards SET visitor_id=$visitor,claimed_at=$now WHERE code=$code AND visitor_id='' AND expires_at>$now";
+        update.Parameters.AddWithValue("$visitor", visitor.VisitorId);
+        update.Parameters.AddWithValue("$now", now);
+        update.Parameters.AddWithValue("$code", code);
+        if (update.ExecuteNonQuery() == 0) return false;
+        AddEvent(db, "reward-claimed-" + code, "reward_claimed",
+            "Coupon claimed", visitor.DisplayName + " claimed the office reward.",
+            "", visitor.PublicAliasConsent ? visitor.DisplayName : "", now);
+        return true;
+    }
+
+    private static RewardView ReadClaimableReward(SqliteDataReader reader) => new()
+    {
+        RewardId = reader.GetString(0), Code = reader.GetString(1),
+        DisplayName = reader.GetString(2), IssuedAtUnixMilliseconds = reader.GetInt64(3),
+        ExpiresAtUnixMilliseconds = reader.GetInt64(4), Description = reader.GetString(5),
+        Claimed = false, PrototypeOnly = true
+    };
 
     public bool AddAppreciation(string token, AppreciationRequest request)
     {
@@ -504,6 +603,13 @@ public sealed class HubStore
         string value = string.Join(' ', (alias ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         if (value.Length > 24) value = value[..24];
         return string.IsNullOrWhiteSpace(value) ? "Visitor" : value;
+    }
+
+    private static string CleanValue(string? value, int maximumLength)
+    {
+        string result = string.Join(' ', (value ?? "").Split(
+            (char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return result.Length > maximumLength ? result[..maximumLength] : result;
     }
 
     private static long Now() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

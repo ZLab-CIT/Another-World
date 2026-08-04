@@ -62,7 +62,13 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
     public void TriggerMockOnlineMilestone(string userId)
     {
         string resolvedUserId = string.IsNullOrEmpty(userId) ? defaultUserId : userId;
-        IssueCoupon(resolvedUserId, defaultCouponId);
+        IssueCoupon(resolvedUserId, new OfflineCouponReward
+        {
+            rewardType = OfflineRewardType.DiscountCoupon,
+            couponId = defaultCouponId,
+            displayName = defaultCouponName,
+            description = defaultCouponDescription
+        }, "mock-productivity-" + DateTime.Now.ToString("yyyy-MM-dd"));
     }
 
     public void TriggerMockOnlineMilestone()
@@ -122,7 +128,7 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
             evt.description, Array.Empty<string>());
 
         if (evt.interactionDirection == InteractionDirection.Bidirectional)
-            IssueCouponFromEvent(physicalEvent.userId, evt);
+            IssueCouponFromEvent(physicalEvent.userId, evt, physicalEvent.eventId);
     }
 
     public void IssueCoupon(string userId, string couponId)
@@ -140,6 +146,12 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
 
     public void IssueCoupon(string userId, OfflineCouponReward reward)
     {
+        IssueCoupon(userId, reward, "unity-" + Guid.NewGuid().ToString("N"));
+    }
+
+    private void IssueCoupon(string userId, OfflineCouponReward reward,
+        string sourceEventId)
+    {
         string resolvedUserId = string.IsNullOrEmpty(userId) ? defaultUserId : userId;
         if (string.IsNullOrEmpty(reward.couponId))
             reward.couponId = defaultCouponId;
@@ -151,8 +163,11 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
             reward.rewardType = OfflineRewardType.DiscountCoupon;
 
         LogHistory("coupon_issued: " + reward.couponId + " -> user: " + resolvedUserId);
-
-        dispatcher.ShowOfflineCoupon(resolvedUserId, reward);
+        OfficeInteractionHubClient.Ensure().PublishClaimableReward(
+            sourceEventId, reward.rewardType.ToString(), reward.displayName,
+            reward.description, 300);
+        dispatcher.ShowWorldAnnouncement(reward.displayName,
+            "Scan the office QR code within five minutes. First claim wins.", null, 5f);
     }
 
     public void EvaluateProductivityMilestone()
@@ -179,16 +194,25 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
         if (average < productivityCouponThreshold)
             return;
 
-        string milestoneId = "avg_productivity_" + Mathf.RoundToInt(productivityCouponThreshold);
+        string milestoneId = "avg_productivity_"
+            + Mathf.RoundToInt(productivityCouponThreshold) + "_"
+            + DateTime.Now.ToString("yyyy-MM-dd");
         if (issueMilestoneCouponOnlyOnce && issuedMilestones.Contains(milestoneId))
             return;
 
         issuedMilestones.Add(milestoneId);
         LogHistory("virtual_milestone: average productivity " + average.ToString("0.0"));
-        IssueCoupon(defaultUserId, defaultCouponId);
+        IssueCoupon(defaultUserId, new OfflineCouponReward
+        {
+            rewardType = OfflineRewardType.DiscountCoupon,
+            couponId = defaultCouponId,
+            displayName = defaultCouponName,
+            description = defaultCouponDescription
+        }, milestoneId);
     }
 
-    private void IssueCouponFromEvent(string userId, VendingEventSO evt)
+    private void IssueCouponFromEvent(string userId, VendingEventSO evt,
+        string sourceEventId)
     {
         OfflineCouponReward reward = evt.offlineReward;
         if (string.IsNullOrEmpty(reward.couponId))
@@ -200,7 +224,8 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
         if (reward.rewardType == OfflineRewardType.None)
             reward.rewardType = OfflineRewardType.DiscountCoupon;
 
-        IssueCoupon(string.IsNullOrEmpty(userId) ? evt.targetUserId : userId, reward);
+        IssueCoupon(string.IsNullOrEmpty(userId) ? evt.targetUserId : userId,
+            reward, "vending-" + sourceEventId);
     }
 
     private string PickProduct(bool cosmetic)

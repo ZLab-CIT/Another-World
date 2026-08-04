@@ -24,6 +24,7 @@ public sealed class OfficeInteractionHubClient : MonoBehaviour
         public OfficeNewspaper latestNewspaper;
         public string newspaperNeededDate;
         public HubEvent[] events;
+        public HubReward claimableReward;
     }
 
     [Serializable]
@@ -60,6 +61,26 @@ public sealed class OfficeInteractionHubClient : MonoBehaviour
         public string agentId;
         public string visitorDisplayName;
         public long createdAtUnixMilliseconds;
+    }
+
+    [Serializable]
+    private sealed class HubReward
+    {
+        public string rewardId;
+        public string code;
+        public string displayName;
+        public string description;
+        public long expiresAtUnixMilliseconds;
+    }
+
+    [Serializable]
+    private sealed class RewardIssuePayload
+    {
+        public string sourceEventId;
+        public string rewardType;
+        public string displayName;
+        public string description;
+        public int claimWindowSeconds;
     }
 
     [Serializable]
@@ -166,6 +187,22 @@ public sealed class OfficeInteractionHubClient : MonoBehaviour
         SaveOutbox();
     }
 
+    public void PublishClaimableReward(string sourceEventId, string rewardType,
+        string displayName, string description, int claimWindowSeconds = 300)
+    {
+        if (string.IsNullOrWhiteSpace(sourceEventId)
+            || string.IsNullOrWhiteSpace(displayName))
+            return;
+        StartCoroutine(PostReward(new RewardIssuePayload
+        {
+            sourceEventId = sourceEventId,
+            rewardType = rewardType ?? "coupon",
+            displayName = displayName,
+            description = description ?? "",
+            claimWindowSeconds = Mathf.Clamp(claimWindowSeconds, 60, 1800)
+        }, Time.realtimeSinceStartup + Mathf.Clamp(claimWindowSeconds, 60, 1800)));
+    }
+
     private IEnumerator PollLoop()
     {
         while (true)
@@ -211,8 +248,13 @@ public sealed class OfficeInteractionHubClient : MonoBehaviour
         PlayerPrefs.SetString("InteractionHub.EventCursor", eventCursor.ToString());
         activeDecision = state.activeDecision;
         latestNewspaper = state.latestNewspaper;
-        display.SetDecision(activeDecision?.authorDisplayName,
-            activeDecision?.question, publicUrl, activeDecision != null);
+        if (state.claimableReward != null)
+            display.SetReward(state.claimableReward.displayName,
+                state.claimableReward.description,
+                state.claimableReward.expiresAtUnixMilliseconds);
+        else
+            display.SetDecision(activeDecision?.authorDisplayName,
+                activeDecision?.question, publicUrl, activeDecision != null);
         display.SetNewspaper(latestNewspaper);
         ProcessEvents(state.events);
         if (!newspaperGenerationInFlight
@@ -265,7 +307,33 @@ public sealed class OfficeInteractionHubClient : MonoBehaviour
                     VendingEventDispatcher.Instance?.ShowWorldAnnouncement(
                         item.title, item.detail, null, 5f);
                     break;
+                case "reward_claimed":
+                    VendingEventDispatcher.Instance?.ShowWorldAnnouncement(
+                        "Coupon claimed", "The five-minute offer found its visitor.", null, 4f);
+                    break;
             }
+        }
+    }
+
+    private IEnumerator PostReward(RewardIssuePayload payload, float retryUntil)
+    {
+        while (Time.realtimeSinceStartup < retryUntil)
+        {
+            using UnityWebRequest request = MakeJsonRequest(
+                baseUrl + "/api/unity/rewards", "POST", JsonUtility.ToJson(payload));
+            yield return request.SendWebRequest();
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                HubReward reward = JsonUtility.FromJson<HubReward>(
+                    request.downloadHandler.text);
+                if (reward != null)
+                    display.SetReward(reward.displayName, reward.description,
+                        reward.expiresAtUnixMilliseconds);
+                yield break;
+            }
+            if (request.responseCode >= 400 && request.responseCode < 500)
+                yield break;
+            yield return new WaitForSecondsRealtime(5f);
         }
     }
 
@@ -443,12 +511,14 @@ public sealed class OfficeInteractionDisplay : MonoBehaviour
     private TMP_Text eyebrow;
     private TMP_Text title;
     private TMP_Text body;
+    private TMP_Text combinedText;
     private string currentQrUrl;
     private OfficeNewspaper newspaper;
     private float nextPaperTime;
     private bool decisionVisible;
     private OfficeInteractionDisplaySettings settings;
     private float nextLayoutRefreshTime;
+    private bool usesAuthoredPrefab;
 
     public static OfficeInteractionDisplay Ensure()
     {
@@ -467,22 +537,51 @@ public sealed class OfficeInteractionDisplay : MonoBehaviour
         gameObject.AddComponent<GraphicRaycaster>();
         group = gameObject.AddComponent<CanvasGroup>();
 
+        settings = Resources.Load<OfficeInteractionDisplaySettings>(
+            "InteractionHub/DisplaySettings");
+        if (!TryCreatePrefabView())
+            CreateFallbackView();
+        ApplyLayout();
+        nextPaperTime = Time.unscaledTime + 90f;
+    }
+
+    private bool TryCreatePrefabView()
+    {
+        if (settings == null || settings.panelPrefab == null)
+            return false;
+
+        OfficeInteractionDisplayView view = Instantiate(settings.panelPrefab, transform, false);
+        if (!view.IsConfigured)
+        {
+            Debug.LogError("[Interaction hub] QR tile prefab is missing one or more view references. Using the generated tile.", view);
+            Destroy(view.gameObject);
+            return false;
+        }
+
+        panelRect = view.Panel;
+        qrImage = view.QrImage;
+        combinedText = view.CombinedText;
+        eyebrow = view.Eyebrow;
+        title = view.Title;
+        body = view.Body;
+        usesAuthoredPrefab = true;
+        return true;
+    }
+
+    private void CreateFallbackView()
+    {
         GameObject panel = new("Interaction panel", typeof(RectTransform), typeof(Image));
         panel.transform.SetParent(transform, false);
         panelRect = panel.GetComponent<RectTransform>();
         panel.GetComponent<Image>().color = new Color(0.96f, 0.91f, 0.79f, 0.97f);
 
         qrImage = CreateQr(panel.transform);
-        eyebrow = CreateText(panel.transform, new Vector2(144f, -18f), new Vector2(302f, 24f),
+        eyebrow = CreateText("Eyebrow", panel.transform, new Vector2(144f, -18f), new Vector2(302f, 24f),
             14, FontStyles.Bold, new Color(0.76f, 0.2f, 0.11f));
-        title = CreateText(panel.transform, new Vector2(144f, -43f), new Vector2(302f, 48f),
+        title = CreateText("Title", panel.transform, new Vector2(144f, -43f), new Vector2(302f, 48f),
             25, FontStyles.Bold, new Color(0.07f, 0.11f, 0.13f));
-        body = CreateText(panel.transform, new Vector2(144f, -93f), new Vector2(302f, 52f),
+        body = CreateText("Body", panel.transform, new Vector2(144f, -93f), new Vector2(302f, 52f),
             15, FontStyles.Normal, new Color(0.12f, 0.18f, 0.2f));
-        settings = Resources.Load<OfficeInteractionDisplaySettings>(
-            "InteractionHub/DisplaySettings");
-        ApplyLayout();
-        nextPaperTime = Time.unscaledTime + 90f;
     }
 
     private void Update()
@@ -494,9 +593,7 @@ public sealed class OfficeInteractionDisplay : MonoBehaviour
         }
         if (!decisionVisible && newspaper != null && Time.unscaledTime >= nextPaperTime)
         {
-            eyebrow.text = "TODAY'S TERRARIUM POST";
-            title.text = newspaper.headline;
-            body.text = newspaper.summary;
+            SetCopy("TODAY'S TERRARIUM POST", newspaper.headline, newspaper.summary);
             nextPaperTime = Time.unscaledTime + 120f;
         }
     }
@@ -521,10 +618,13 @@ public sealed class OfficeInteractionDisplay : MonoBehaviour
         panelRect.anchoredPosition = new Vector2(
             anchor.x > 0.5f ? -margin.x : margin.x,
             anchor.y > 0.5f ? -margin.y : margin.y);
-        panelRect.sizeDelta = settings != null
-            ? settings.panelSize : new Vector2(470f, 158f);
         panelRect.localScale = Vector3.one * (settings != null ? settings.scale : 1f);
         canvas.sortingOrder = settings != null ? settings.canvasSortingOrder : 900;
+        if (usesAuthoredPrefab)
+            return;
+
+        panelRect.sizeDelta = settings != null
+            ? settings.panelSize : new Vector2(470f, 158f);
         eyebrow.fontSize = settings != null ? settings.eyebrowFontSize : 14f;
         title.fontSize = settings != null ? settings.titleFontSize : 25f;
         body.fontSize = settings != null ? settings.bodyFontSize : 15f;
@@ -546,9 +646,10 @@ public sealed class OfficeInteractionDisplay : MonoBehaviour
 
     public void SetConnection(bool connected, string url)
     {
-        eyebrow.text = connected ? "SCAN TO INFLUENCE THE OFFICE" : "INTERACTION HUB OFFLINE";
-        title.text = connected ? "Another World is listening" : "The world continues locally";
-        body.text = connected ? url : "Start the LAN hub to enable visitor decisions.";
+        SetCopy(
+            connected ? "SCAN TO INFLUENCE THE OFFICE" : "INTERACTION HUB OFFLINE",
+            connected ? "Another World is listening" : "The world continues locally",
+            connected ? url : "Start the LAN hub to enable visitor decisions.");
         if (connected && currentQrUrl != url)
         {
             currentQrUrl = url;
@@ -561,14 +662,38 @@ public sealed class OfficeInteractionDisplay : MonoBehaviour
         decisionVisible = visible;
         if (!visible)
         {
-            eyebrow.text = "SCAN TO INFLUENCE THE OFFICE";
-            title.text = "Another World is listening";
-            body.text = url;
+            SetCopy("SCAN TO INFLUENCE THE OFFICE", "Another World is listening", url);
             return;
         }
-        eyebrow.text = (author ?? "A CHARACTER").ToUpperInvariant() + " ASKS THE OFFICE";
-        title.text = question ?? "A visitor decision is open";
-        body.text = "Scan to vote. The majority changes the next story.";
+        SetCopy(
+            (author ?? "A CHARACTER").ToUpperInvariant() + " ASKS THE OFFICE",
+            question ?? "A visitor decision is open",
+            "Scan to vote. The majority changes the next story.");
+    }
+
+    public void SetReward(string rewardName, string description,
+        long expiresAtUnixMilliseconds)
+    {
+        long remainingMilliseconds = Math.Max(0L, expiresAtUnixMilliseconds
+            - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        int minutes = Mathf.Max(1, Mathf.CeilToInt(remainingMilliseconds / 60000f));
+        SetCopy("COUPON AVAILABLE - SCAN TO CLAIM",
+            rewardName ?? "Office reward",
+            (description ?? "A character prepared a reward.") + " First claim wins; "
+            + minutes + (minutes == 1 ? " minute remains." : " minutes remain."));
+    }
+
+    private void SetCopy(string eyebrowValue, string titleValue, string bodyValue)
+    {
+        if (combinedText != null)
+        {
+            combinedText.text = $"<b>{eyebrowValue}</b>\n{titleValue}\n{bodyValue}";
+            return;
+        }
+
+        eyebrow.text = eyebrowValue;
+        title.text = titleValue;
+        body.text = bodyValue;
     }
 
     public void SetNewspaper(OfficeNewspaper value)
@@ -601,10 +726,10 @@ public sealed class OfficeInteractionDisplay : MonoBehaviour
         return go.GetComponent<RawImage>();
     }
 
-    private static TMP_Text CreateText(Transform parent, Vector2 position,
+    private static TMP_Text CreateText(string name, Transform parent, Vector2 position,
         Vector2 size, float fontSize, FontStyles style, Color color)
     {
-        GameObject go = new("Text", typeof(RectTransform), typeof(TextMeshProUGUI));
+        GameObject go = new(name, typeof(RectTransform), typeof(TextMeshProUGUI));
         go.transform.SetParent(parent, false);
         RectTransform rect = go.GetComponent<RectTransform>();
         rect.anchorMin = new Vector2(0f, 1f);

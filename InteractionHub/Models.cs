@@ -6,6 +6,8 @@ public sealed record VisitorSession(string VisitorId, string Token, string Displ
 public sealed record VoteRequest(string OptionId);
 public sealed record AppreciationRequest(string RecipientVisitorId, string Category,
     string CourierAgentId, bool PublicConsent);
+public sealed record RewardIssueRequest(string SourceEventId, string RewardType,
+    string DisplayName, string Description, int ClaimWindowSeconds);
 public sealed record UnityEventRequest(string EventId, string Kind, string Title,
     string Detail, string[] AgentIds, long OccurredAtUnixMilliseconds);
 public sealed record NewspaperRequest(string Date, string Headline, string Summary,
@@ -82,6 +84,9 @@ public sealed class RewardView
     public string DisplayName { get; set; } = "";
     public bool PrototypeOnly { get; set; } = true;
     public long IssuedAtUnixMilliseconds { get; set; }
+    public long ExpiresAtUnixMilliseconds { get; set; }
+    public bool Claimed { get; set; }
+    public string Description { get; set; } = "";
 }
 
 public sealed class PublicStateView
@@ -91,6 +96,7 @@ public sealed class PublicStateView
     public NewspaperView? LatestNewspaper { get; set; }
     public VisitorSession? Visitor { get; set; }
     public RewardView[] Rewards { get; set; } = [];
+    public RewardView? ClaimableReward { get; set; }
 }
 
 public sealed class UnityStateView
@@ -101,4 +107,5 @@ public sealed class UnityStateView
     public NewspaperView? LatestNewspaper { get; set; }
     public string NewspaperNeededDate { get; set; } = "";
     public HubEventView[] Events { get; set; } = [];
+    public RewardView? ClaimableReward { get; set; }
 }
