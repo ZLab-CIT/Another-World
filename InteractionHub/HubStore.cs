@@ -4,6 +4,7 @@ using Microsoft.Data.Sqlite;
 
 public sealed class HubStore
 {
+    private const long CouponValidityMilliseconds = 7L * 24L * 60L * 60L * 1000L;
     private readonly string connectionString;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -69,6 +70,19 @@ public sealed class HubStore
         EnsureColumn(db, "rewards", "claimed_at", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(db, "rewards", "description", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(db, "rewards", "source_key", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(db, "rewards", "used_at", "INTEGER NOT NULL DEFAULT 0");
+        using SqliteCommand migrateRewards = db.CreateCommand();
+        migrateRewards.CommandText = """
+            UPDATE rewards
+            SET expires_at=claimed_at+$validity
+            WHERE visitor_id<>'' AND claimed_at>0
+              AND expires_at<claimed_at+$validity;
+            UPDATE rewards
+            SET claimed_at=issued_at,expires_at=issued_at+$validity
+            WHERE visitor_id<>'' AND claimed_at=0 AND expires_at=0;
+            """;
+        migrateRewards.Parameters.AddWithValue("$validity", CouponValidityMilliseconds);
+        migrateRewards.ExecuteNonQuery();
         using SqliteCommand index = db.CreateCommand();
         index.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS rewards_source_key ON rewards(source_key) WHERE source_key<>''";
         index.ExecuteNonQuery();
@@ -94,12 +108,13 @@ public sealed class HubStore
     public VisitorSession Register(string? token, RegisterVisitorRequest request)
     {
         long now = Now();
+        string alias = CleanAlias(request.Alias);
         using SqliteConnection db = Open();
         if (!string.IsNullOrWhiteSpace(token))
         {
             using SqliteCommand update = db.CreateCommand();
             update.CommandText = "UPDATE visitors SET alias=$alias, public_alias=$public, last_seen=$now WHERE token=$token";
-            update.Parameters.AddWithValue("$alias", CleanAlias(request.Alias));
+            update.Parameters.AddWithValue("$alias", alias);
             update.Parameters.AddWithValue("$public", request.PublicAliasConsent ? 1 : 0);
             update.Parameters.AddWithValue("$now", now);
             update.Parameters.AddWithValue("$token", token);
@@ -107,9 +122,24 @@ public sealed class HubStore
                 return GetVisitorByToken(db, token)!;
         }
 
+        // Named aliases act as lightweight prototype identities across QR browser contexts.
+        if (alias != "Visitor")
+        {
+            string? existingToken = FindCanonicalVisitorTokenByAlias(db, alias);
+            if (!string.IsNullOrWhiteSpace(existingToken))
+            {
+                using SqliteCommand resume = db.CreateCommand();
+                resume.CommandText = "UPDATE visitors SET public_alias=$public,last_seen=$now WHERE token=$token";
+                resume.Parameters.AddWithValue("$public", request.PublicAliasConsent ? 1 : 0);
+                resume.Parameters.AddWithValue("$now", now);
+                resume.Parameters.AddWithValue("$token", existingToken);
+                resume.ExecuteNonQuery();
+                return GetVisitorByToken(db, existingToken)!;
+            }
+        }
+
         string id = Guid.NewGuid().ToString("N");
         string newToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
-        string alias = CleanAlias(request.Alias);
         if (alias == "Visitor")
             alias = "Visitor " + id[..4].ToUpperInvariant();
         using SqliteCommand insert = db.CreateCommand();
@@ -133,7 +163,17 @@ public sealed class HubStore
     private static VisitorSession? GetVisitorByToken(SqliteConnection db, string token)
     {
         using SqliteCommand command = db.CreateCommand();
-        command.CommandText = "SELECT id, token, alias, public_alias, contributions FROM visitors WHERE token=$token";
+        command.CommandText = """
+            SELECT candidate.id,candidate.token,candidate.alias,candidate.public_alias,
+                   candidate.contributions
+            FROM visitors requested
+            JOIN visitors candidate ON lower(candidate.alias)=lower(requested.alias)
+            WHERE requested.token=$token
+            ORDER BY candidate.contributions DESC,
+                     (SELECT COUNT(*) FROM rewards WHERE visitor_id=candidate.id) DESC,
+                     candidate.created_at ASC
+            LIMIT 1
+            """;
         command.Parameters.AddWithValue("$token", token);
         using SqliteDataReader reader = command.ExecuteReader();
         if (!reader.Read()) return null;
@@ -141,6 +181,22 @@ public sealed class HubStore
         string alias = reader.GetString(2);
         return new VisitorSession(reader.GetString(0), reader.GetString(1),
             publicAlias ? alias : "A returning visitor", publicAlias, reader.GetInt32(4));
+    }
+
+    private static string? FindCanonicalVisitorTokenByAlias(SqliteConnection db,
+        string alias)
+    {
+        using SqliteCommand command = db.CreateCommand();
+        command.CommandText = """
+            SELECT token FROM visitors
+            WHERE lower(alias)=lower($alias)
+            ORDER BY contributions DESC,
+                     (SELECT COUNT(*) FROM rewards WHERE visitor_id=visitors.id) DESC,
+                     created_at ASC
+            LIMIT 1
+            """;
+        command.Parameters.AddWithValue("$alias", alias);
+        return command.ExecuteScalar() as string;
     }
 
     public DecisionView? CreateDecision(DecisionRequest request)
@@ -293,6 +349,23 @@ public sealed class HubStore
             request.OccurredAtUnixMilliseconds > 0 ? request.OccurredAtUnixMilliseconds : Now());
     }
 
+    public bool RecordQrScan(string? token, string scanId)
+    {
+        string cleanScanId = CleanValue(scanId, 80);
+        if (string.IsNullOrWhiteSpace(cleanScanId))
+            return false;
+
+        using SqliteConnection db = Open();
+        VisitorSession? visitor = GetVisitorByToken(db, token ?? "");
+        bool canNameVisitor = visitor?.PublicAliasConsent == true;
+        string visitorName = canNameVisitor ? visitor!.DisplayName : "";
+        string detail = canNameVisitor
+            ? visitor!.DisplayName + " opened the office QR link."
+            : "A visitor opened the office QR link.";
+        return AddEvent(db, "qr-scanned-" + cleanScanId, "qr_scanned",
+            "QR scanned", detail, "", visitorName, Now());
+    }
+
     public HubEventView[] GetEvents(long after, int limit = 100)
     {
         using SqliteConnection db = Open();
@@ -367,7 +440,7 @@ public sealed class HubStore
     {
         using SqliteConnection db = Open();
         using SqliteCommand command = db.CreateCommand();
-        command.CommandText = "SELECT id,code,display_name,issued_at,expires_at,description FROM rewards WHERE visitor_id=$visitor ORDER BY issued_at DESC";
+        command.CommandText = "SELECT id,code,display_name,issued_at,expires_at,description,used_at FROM rewards WHERE visitor_id=$visitor ORDER BY issued_at DESC";
         command.Parameters.AddWithValue("$visitor", visitorId);
         using SqliteDataReader reader = command.ExecuteReader();
         List<RewardView> rewards = [];
@@ -376,7 +449,9 @@ public sealed class HubStore
             RewardId = reader.GetString(0), Code = reader.GetString(1), DisplayName = reader.GetString(2),
             IssuedAtUnixMilliseconds = reader.GetInt64(3),
             ExpiresAtUnixMilliseconds = reader.GetInt64(4),
-            Description = reader.GetString(5), Claimed = true, PrototypeOnly = true
+            Description = reader.GetString(5), Claimed = true,
+            UsedAtUnixMilliseconds = reader.GetInt64(6),
+            Used = reader.GetInt64(6) > 0, PrototypeOnly = true
         });
         return rewards.ToArray();
     }
@@ -385,7 +460,7 @@ public sealed class HubStore
     {
         using SqliteConnection db = Open();
         using SqliteCommand command = db.CreateCommand();
-        command.CommandText = "SELECT id,code,display_name,issued_at,expires_at,description,visitor_id FROM rewards WHERE code=$code";
+        command.CommandText = "SELECT id,code,display_name,issued_at,expires_at,description,visitor_id,used_at FROM rewards WHERE code=$code";
         command.Parameters.AddWithValue("$code", code);
         using SqliteDataReader reader = command.ExecuteReader();
         return reader.Read() ? new RewardView
@@ -393,7 +468,9 @@ public sealed class HubStore
             RewardId = reader.GetString(0), Code = reader.GetString(1),
             DisplayName = reader.GetString(2), IssuedAtUnixMilliseconds = reader.GetInt64(3),
             ExpiresAtUnixMilliseconds = reader.GetInt64(4), Description = reader.GetString(5),
-            Claimed = !string.IsNullOrWhiteSpace(reader.GetString(6)), PrototypeOnly = true
+            Claimed = !string.IsNullOrWhiteSpace(reader.GetString(6)),
+            UsedAtUnixMilliseconds = reader.GetInt64(7),
+            Used = reader.GetInt64(7) > 0, PrototypeOnly = true
         } : null;
     }
 
@@ -450,14 +527,33 @@ public sealed class HubStore
         if (visitor == null) return false;
         long now = Now();
         using SqliteCommand update = db.CreateCommand();
-        update.CommandText = "UPDATE rewards SET visitor_id=$visitor,claimed_at=$now WHERE code=$code AND visitor_id='' AND expires_at>$now";
+        update.CommandText = "UPDATE rewards SET visitor_id=$visitor,claimed_at=$now,expires_at=$validUntil WHERE code=$code AND visitor_id='' AND expires_at>$now";
         update.Parameters.AddWithValue("$visitor", visitor.VisitorId);
         update.Parameters.AddWithValue("$now", now);
+        update.Parameters.AddWithValue("$validUntil", now + CouponValidityMilliseconds);
         update.Parameters.AddWithValue("$code", code);
         if (update.ExecuteNonQuery() == 0) return false;
         AddEvent(db, "reward-claimed-" + code, "reward_claimed",
             "Coupon claimed", visitor.DisplayName + " claimed the office reward.",
             "", visitor.PublicAliasConsent ? visitor.DisplayName : "", now);
+        return true;
+    }
+
+    public bool UseReward(string token, string code)
+    {
+        using SqliteConnection db = Open();
+        VisitorSession? visitor = GetVisitorByToken(db, token);
+        if (visitor == null) return false;
+        long now = Now();
+        using SqliteCommand update = db.CreateCommand();
+        update.CommandText = "UPDATE rewards SET used_at=$now WHERE code=$code AND visitor_id=$visitor AND used_at=0 AND expires_at>$now";
+        update.Parameters.AddWithValue("$now", now);
+        update.Parameters.AddWithValue("$code", code);
+        update.Parameters.AddWithValue("$visitor", visitor.VisitorId);
+        if (update.ExecuteNonQuery() == 0) return false;
+        AddEvent(db, "reward-used-" + code, "reward_used", "Coupon used",
+            visitor.DisplayName + " used an office coupon.", "",
+            visitor.PublicAliasConsent ? visitor.DisplayName : "", now);
         return true;
     }
 
@@ -536,12 +632,14 @@ public sealed class HubStore
         {
             string rewardId = Guid.NewGuid().ToString("N");
             string code = "STORY-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(4));
+            long now = Now();
             using SqliteCommand insert = db.CreateCommand();
-            insert.CommandText = "INSERT OR IGNORE INTO rewards(id,visitor_id,campaign,code,display_name,issued_at) VALUES($id,$visitor,'story-contributor-v1',$code,'Story Contributor Surprise',$now)";
+            insert.CommandText = "INSERT OR IGNORE INTO rewards(id,visitor_id,campaign,code,display_name,issued_at,expires_at,claimed_at) VALUES($id,$visitor,'story-contributor-v1',$code,'Story Contributor Surprise',$now,$expires,$now)";
             insert.Parameters.AddWithValue("$id", rewardId);
             insert.Parameters.AddWithValue("$visitor", visitorId);
             insert.Parameters.AddWithValue("$code", code);
-            insert.Parameters.AddWithValue("$now", Now());
+            insert.Parameters.AddWithValue("$now", now);
+            insert.Parameters.AddWithValue("$expires", now + CouponValidityMilliseconds);
             if (insert.ExecuteNonQuery() > 0)
             {
                 using SqliteCommand character = db.CreateCommand();

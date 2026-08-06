@@ -26,6 +26,13 @@ string? VisitorToken(HttpRequest request) =>
 app.MapPost("/api/visitors/register", (HttpRequest http, RegisterVisitorRequest request, HubStore store) =>
     Results.Ok(store.Register(VisitorToken(http), request)));
 
+app.MapPost("/api/visits/scan", (HttpRequest http, QrScanRequest request, HubStore store) =>
+{
+    if (string.IsNullOrWhiteSpace(request.ScanId)) return Results.BadRequest();
+    return store.RecordQrScan(VisitorToken(http), request.ScanId)
+        ? Results.Accepted() : Results.Ok();
+});
+
 app.MapGet("/api/state", (HttpRequest http, HubStore store) =>
 {
     VisitorSession? visitor = store.GetVisitor(VisitorToken(http));
@@ -66,6 +73,13 @@ app.MapPost("/api/rewards/{code}/claim", (string code, HttpRequest http, HubStor
     string? token = VisitorToken(http);
     if (string.IsNullOrWhiteSpace(token)) return Results.Unauthorized();
     return store.ClaimReward(token, code) ? Results.Accepted() : Results.Conflict();
+});
+
+app.MapPost("/api/rewards/{code}/use", (string code, HttpRequest http, HubStore store) =>
+{
+    string? token = VisitorToken(http);
+    if (string.IsNullOrWhiteSpace(token)) return Results.Unauthorized();
+    return store.UseReward(token, code) ? Results.Accepted() : Results.Conflict();
 });
 
 app.MapGet("/api/newspapers", (HubStore store) => Results.Ok(store.GetNewspaperArchive()));

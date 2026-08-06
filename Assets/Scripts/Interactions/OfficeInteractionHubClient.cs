@@ -308,8 +308,18 @@ public sealed class OfficeInteractionHubClient : MonoBehaviour
                         item.title, item.detail, null, 5f);
                     break;
                 case "reward_claimed":
+                    display.SetTransientCopy("COUPON CLAIMED", item.title,
+                        item.detail, 8f);
                     VendingEventDispatcher.Instance?.ShowWorldAnnouncement(
                         "Coupon claimed", "The five-minute offer found its visitor.", null, 4f);
+                    break;
+                case "qr_scanned":
+                    display.SetTransientCopy("QR SCANNED", "A visitor entered the office",
+                        item.detail, 6f);
+                    break;
+                case "reward_used":
+                    display.SetTransientCopy("COUPON USED", item.title,
+                        item.detail, 6f);
                     break;
             }
         }
@@ -519,6 +529,11 @@ public sealed class OfficeInteractionDisplay : MonoBehaviour
     private OfficeInteractionDisplaySettings settings;
     private float nextLayoutRefreshTime;
     private bool usesAuthoredPrefab;
+    private float transientCopyUntil;
+    private string baseEyebrow = "";
+    private string baseTitle = "";
+    private string baseBody = "";
+    private long visibleRewardExpiresAt;
 
     public static OfficeInteractionDisplay Ensure()
     {
@@ -591,6 +606,17 @@ public sealed class OfficeInteractionDisplay : MonoBehaviour
             nextLayoutRefreshTime = Time.unscaledTime + 1f;
             ApplyLayout();
         }
+        if (transientCopyUntil > 0f && Time.unscaledTime >= transientCopyUntil)
+        {
+            transientCopyUntil = 0f;
+            ApplyCopy(baseEyebrow, baseTitle, baseBody);
+        }
+        if (visibleRewardExpiresAt > 0
+            && DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() >= visibleRewardExpiresAt)
+        {
+            visibleRewardExpiresAt = 0;
+            SetDecision(null, null, currentQrUrl, false);
+        }
         if (!decisionVisible && newspaper != null && Time.unscaledTime >= nextPaperTime)
         {
             SetCopy("TODAY'S TERRARIUM POST", newspaper.headline, newspaper.summary);
@@ -662,6 +688,7 @@ public sealed class OfficeInteractionDisplay : MonoBehaviour
         decisionVisible = visible;
         if (!visible)
         {
+            visibleRewardExpiresAt = 0;
             SetCopy("SCAN TO INFLUENCE THE OFFICE", "Another World is listening", url);
             return;
         }
@@ -676,6 +703,12 @@ public sealed class OfficeInteractionDisplay : MonoBehaviour
     {
         long remainingMilliseconds = Math.Max(0L, expiresAtUnixMilliseconds
             - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        if (remainingMilliseconds <= 0L)
+        {
+            SetDecision(null, null, currentQrUrl, false);
+            return;
+        }
+        visibleRewardExpiresAt = expiresAtUnixMilliseconds;
         int minutes = Mathf.Max(1, Mathf.CeilToInt(remainingMilliseconds / 60000f));
         SetCopy("COUPON AVAILABLE - SCAN TO CLAIM",
             rewardName ?? "Office reward",
@@ -683,7 +716,26 @@ public sealed class OfficeInteractionDisplay : MonoBehaviour
             + minutes + (minutes == 1 ? " minute remains." : " minutes remain."));
     }
 
+    public void SetTransientCopy(string eyebrowValue, string titleValue,
+        string bodyValue, float seconds)
+    {
+        transientCopyUntil = Mathf.Max(transientCopyUntil,
+            Time.unscaledTime + Mathf.Max(1f, seconds));
+        ApplyCopy(eyebrowValue, titleValue, bodyValue);
+    }
+
     private void SetCopy(string eyebrowValue, string titleValue, string bodyValue)
+    {
+        baseEyebrow = eyebrowValue ?? "";
+        baseTitle = titleValue ?? "";
+        baseBody = bodyValue ?? "";
+        if (Time.unscaledTime < transientCopyUntil)
+            return;
+
+        ApplyCopy(baseEyebrow, baseTitle, baseBody);
+    }
+
+    private void ApplyCopy(string eyebrowValue, string titleValue, string bodyValue)
     {
         if (combinedText != null)
         {

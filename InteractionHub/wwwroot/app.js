@@ -60,7 +60,7 @@ function render() {
         $('claimName').textContent = claimable.displayName;
         $('claimDescription').textContent = claimable.description || 'A character prepared this for someone nearby.';
         const claimSeconds = Math.max(0, Math.ceil((claimable.expiresAtUnixMilliseconds-Date.now())/1000));
-        $('claimTimer').textContent = `First claim wins. About ${Math.ceil(claimSeconds/60)} minute${claimSeconds>60?'s':''} remaining.`;
+        $('claimTimer').textContent = `Claim before ${formatDate(claimable.expiresAtUnixMilliseconds)}. About ${Math.ceil(claimSeconds/60)} minute${claimSeconds>60?'s':''} remaining.`;
         $('claimReward').disabled = !visitor;
         $('claimReward').textContent = visitor ? 'Claim this coupon' : 'Register above to claim';
     }
@@ -80,19 +80,45 @@ function render() {
     $('reward').classList.toggle('hidden', !reward);
     if (reward) {
         $('rewardName').textContent = reward.displayName;
-        $('rewardCode').textContent = reward.code
+        $('rewardCode').textContent = reward.code;
+        const expired = reward.expiresAtUnixMilliseconds <= Date.now();
+        $('rewardExpiration').textContent = `Valid until ${formatDate(reward.expiresAtUnixMilliseconds)}.`;
+        $('useReward').disabled = reward.used || expired;
+        $('useReward').textContent = reward.used ? 'Coupon used' : expired ? 'Coupon expired' : 'Use coupon';
+        $('rewardStatus').textContent = reward.used
+            ? `Used ${formatDate(reward.usedAtUnixMilliseconds)}.`
+            : expired ? 'This prototype coupon has expired.' : 'Ready to use.'
     }
 }
 
 async function refresh() {
     try {
         state = await api('/api/state');
+        if (state?.visitor?.token && state.visitor.token !== token) {
+            token = state.visitor.token;
+            localStorage.setItem('awVisitorToken', token)
+        }
         render();
         renderRewardQr()
     } catch
     {
         $('identity').textContent = 'The virtual office is temporarily unreachable.'
     }
+}
+
+async function recordQrScan() {
+    let scanId = sessionStorage.getItem('awQrScanId');
+    if (!scanId) {
+        scanId = globalThis.crypto?.randomUUID?.()
+            || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        sessionStorage.setItem('awQrScanId', scanId)
+    }
+    try {
+        await api('/api/visits/scan', {
+            method:'POST',
+            body:JSON.stringify({scanId})
+        })
+    } catch {}
 }
 
 function renderRewardQr() {
@@ -161,6 +187,25 @@ async function claimReward() {
     }
 }
 
+async function useReward() {
+    const reward = state?.rewards?.[0];
+    if (!reward || reward.used || reward.expiresAtUnixMilliseconds <= Date.now()) return;
+    $('useReward').disabled = true;
+    try {
+        await api(`/api/rewards/${encodeURIComponent(reward.code)}/use`, {method:'POST'});
+        $('rewardStatus').textContent = 'Coupon used successfully.';
+    } catch {
+        $('rewardStatus').textContent = 'The coupon was already used or has expired.'
+    }
+    await refresh()
+}
+
+function formatDate(value) {
+    return new Date(value).toLocaleString([], {
+        year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'
+    })
+}
+
 function escapeHtml(value) {
     const element = document.createElement('span');
     element.textContent = value || '';
@@ -176,6 +221,8 @@ $('forget').onclick = () => {
 };
 $('appreciate').onclick = appreciate;
 $('claimReward').onclick = claimReward;
+$('useReward').onclick = useReward;
+recordQrScan();
 refresh().then(loadVisitors);
 loadArchive();
 setInterval(() => {

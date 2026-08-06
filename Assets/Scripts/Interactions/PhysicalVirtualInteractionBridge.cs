@@ -162,12 +162,10 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
         if (reward.rewardType == OfflineRewardType.None)
             reward.rewardType = OfflineRewardType.DiscountCoupon;
 
-        LogHistory("coupon_issued: " + reward.couponId + " -> user: " + resolvedUserId);
+        LogHistory("coupon_requested: " + reward.couponId + " -> user: " + resolvedUserId);
         OfficeInteractionHubClient.Ensure().PublishClaimableReward(
             sourceEventId, reward.rewardType.ToString(), reward.displayName,
             reward.description, 300);
-        dispatcher.ShowWorldAnnouncement(reward.displayName,
-            "Scan the office QR code within five minutes. First claim wins.", null, 5f);
     }
 
     public void EvaluateProductivityMilestone()

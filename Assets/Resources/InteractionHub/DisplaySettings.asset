@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   panelPrefab: {fileID: 5777466405860741727, guid: 2ea1f99d13f6a464f8da965c1eddcbe8, type: 3}
   corner: 1
-  margin: {x: 50, y: 20}
+  margin: {x: 55, y: 25}
   panelSize: {x: 280, y: 121}
   qrSize: {x: 72, y: 72}
   eyebrowFontSize: 8

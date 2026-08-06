@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 
 public sealed record RegisterVisitorRequest(string? Alias, bool PublicAliasConsent);
+public sealed record QrScanRequest(string ScanId);
 public sealed record VisitorSession(string VisitorId, string Token, string DisplayName,
     bool PublicAliasConsent, int StoryContributions);
 public sealed record VoteRequest(string OptionId);
@@ -86,6 +87,8 @@ public sealed class RewardView
     public long IssuedAtUnixMilliseconds { get; set; }
     public long ExpiresAtUnixMilliseconds { get; set; }
     public bool Claimed { get; set; }
+    public bool Used { get; set; }
+    public long UsedAtUnixMilliseconds { get; set; }
     public string Description { get; set; } = "";
 }
 
