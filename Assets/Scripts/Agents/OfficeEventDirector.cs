@@ -347,10 +347,6 @@ public class OfficeEventDirector : MonoBehaviour
                 }
                 return;
 
-            case "phone":
-                TryStartEpisodePhoneCall(beat);
-                return;
-
             case "conversation":
                 if (!pendingEpisode.actionsQueued)
                 {
@@ -747,37 +743,6 @@ public class OfficeEventDirector : MonoBehaviour
             }
         }
         return line;
-    }
-
-    private void TryStartEpisodePhoneCall(OfficeEpisodeBeat beat)
-    {
-        if (pendingEpisode != null)
-            pendingEpisode.expiresAt = Mathf.Min(
-                pendingEpisode.expiresAt, Time.time + 30f);
-        if (beat?.participantIds == null || beat.participantIds.Length != 1
-            || beat.dialogue == null || beat.dialogue.Length < 2)
-        {
-            SkipPendingEpisode("invalid prepared phone call");
-            return;
-        }
-        AIWorkerAgent caller = FindWorker(beat.participantIds[0]);
-        if (caller == null || !caller.CanJoinStoryBeat)
-            return;
-
-        List<string> lines = new();
-        foreach (OfficeEpisodeDialogueLine dialogueLine in beat.dialogue)
-            if (dialogueLine != null
-                && string.Equals(dialogueLine.agentId, caller.AgentId,
-                    StringComparison.OrdinalIgnoreCase)
-                && !string.IsNullOrWhiteSpace(dialogueLine.line))
-                lines.Add(dialogueLine.line.Trim());
-        if (lines.Count < 2)
-        {
-            SkipPendingEpisode("phone call had too few lines");
-            return;
-        }
-        if (caller.StartPreparedPhoneCall(lines, beat.topic))
-            CompletePendingEpisode();
     }
 
     private void CompletePendingEpisode()

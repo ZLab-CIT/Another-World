@@ -44,7 +44,6 @@ public sealed class AgentActivity
     public bool interactionSucceeded;
     public bool highPriorityConversation;
     public ConversationScript preparedScript;
-    public List<string> preparedSpeechLines;
     public bool routineConversationReserved;
     public System.Action onConversationStarted;
 }
@@ -84,7 +83,6 @@ public class AIWorkerAgent : MonoBehaviour
 
     private static readonly Dictionary<string, ThoughtClaim> RecentThoughtClaims = new();
     private const float DuplicateThoughtWindowSeconds = 4f;
-    private static AIWorkerAgent activePhoneCaller;
 
     private enum WorkerState
     {
@@ -368,8 +366,6 @@ public class AIWorkerAgent : MonoBehaviour
 
     private void OnDestroy()
     {
-        if (activePhoneCaller == this)
-            activePhoneCaller = null;
         if (LLMBrainService.Instance != null)
         {
             LLMBrainService.Instance.UnregisterRuntimeAgent(this);
@@ -505,12 +501,6 @@ public class AIWorkerAgent : MonoBehaviour
             && GetConversationIntent(bestAction) == null)
         {
             BeginSocialPlanning(bestAction);
-            return;
-        }
-
-        if (bestAction.actionType == OfficeActionType.PhoneCall)
-        {
-            stateTimer = decisionDelay;
             return;
         }
 
@@ -697,8 +687,6 @@ public class AIWorkerAgent : MonoBehaviour
                 return plan.destinationMode == OfficeDestinationMode.FreePosition
                     ? OfficeDestinationMode.FreePosition
                     : OfficeDestinationMode.CurrentPosition;
-            case OfficeActionType.PhoneCall:
-                return OfficeDestinationMode.CurrentPosition;
             default:
                 return OfficeDestinationMode.ActionPoint;
         }
@@ -1021,30 +1009,6 @@ public class AIWorkerAgent : MonoBehaviour
         return false;
     }
 
-    public bool StartPreparedPhoneCall(List<string> lines, string reason)
-    {
-        if (lines == null || lines.Count == 0 || conversation == null
-            || conversation.IsInConversation
-            || (activePhoneCaller != null && activePhoneCaller != this)
-            || !CanAcceptStoryBeat())
-            return false;
-
-        InterruptCurrentAction();
-        AgentActivity call = new()
-        {
-            actionType = OfficeActionType.PhoneCall,
-            destinationMode = OfficeDestinationMode.CurrentPosition,
-            // Keep prepared calls visible long enough to notice at office scale.
-            duration = Mathf.Max(14f, lines.Count * 4f),
-            reason = reason,
-            preparedSpeechLines = new List<string>(lines)
-        };
-        if (!TryStartFlexibleActivity(call, ""))
-            return false;
-        activePhoneCaller = this;
-        return true;
-    }
-
     public bool RequestApproachConversation(AIWorkerAgent target, string topic,
         string openingLine, bool highPriority = false,
         ConversationScript preparedScript = null,
@@ -1126,8 +1090,6 @@ public class AIWorkerAgent : MonoBehaviour
         foreach (OfficeActionPoint actionPoint in actionPoints)
         {
             if (actionPoint == null)
-                continue;
-            if (actionPoint.actionType == OfficeActionType.PhoneCall)
                 continue;
 
             if (actionPoint.actionType == OfficeActionType.WorkDesk &&
@@ -1317,7 +1279,6 @@ public class AIWorkerAgent : MonoBehaviour
             case OfficeActionType.BreakSpot: return "take a break";
             case OfficeActionType.ChatSpot: return "chat with coworkers";
             case OfficeActionType.MeetingRoom: return "join a meeting";
-            case OfficeActionType.PhoneCall: return "make a phone call";
             case OfficeActionType.Printer: return "check the printer";
             case OfficeActionType.Whiteboard: return "think at the whiteboard";
             case OfficeActionType.PlantCare: return "water the office plant";
@@ -1555,20 +1516,6 @@ public class AIWorkerAgent : MonoBehaviour
         {
             stateTimer = Mathf.Max(stateTimer, 30f);
             TryBeginNearbyInteraction(currentActivity);
-        }
-
-        if (startedType == OfficeActionType.PhoneCall)
-        {
-            if (currentActivity.preparedSpeechLines != null
-                && currentActivity.preparedSpeechLines.Count > 0)
-            {
-                stateTimer = Mathf.Max(stateTimer,
-                    1.2f + currentActivity.preparedSpeechLines.Count * 2.8f);
-                StartCoroutine(DisplayGeneratedLines(currentActivity,
-                    currentActivity.preparedSpeechLines, "Phone call",
-                    new Color32(37, 99, 235, 255),
-                    phoneCall: true, showIncomingStatus: true));
-            }
         }
         ShowPhysicalStoryEmotion(startedType);
 
@@ -1948,9 +1895,6 @@ public class AIWorkerAgent : MonoBehaviour
     {
         switch (actionType)
         {
-            case OfficeActionType.PhoneCall:
-                ApplyEffects(-1f, 1f, 4f, 0f);
-                break;
             case OfficeActionType.WalkAround:
                 ApplyEffects(-1f, 4f, 0f, 0f);
                 break;
@@ -1975,36 +1919,8 @@ public class AIWorkerAgent : MonoBehaviour
         activityThoughtVisible = true;
     }
 
-    private IEnumerator DisplayGeneratedLines(AgentActivity activity, List<string> lines,
-        string logLabel, Color color, bool phoneCall = false,
-        bool showIncomingStatus = false)
-    {
-        if (phoneCall && showIncomingStatus)
-        {
-            presentation.ShowPhoneStatus(DisplayName, true, color);
-            activityThoughtVisible = true;
-            yield return new WaitForSeconds(1.1f);
-        }
-
-        foreach (string line in lines)
-        {
-            if (currentActivity != activity)
-                yield break;
-            if (phoneCall)
-                presentation.ShowPhoneSpeech(DisplayName, line, color);
-            else
-                ShowSpeech(DisplayName, line, color);
-            activityThoughtVisible = true;
-            Debug.Log("[" + logLabel + "] " + DisplayName + ": " + line, this);
-            yield return new WaitForSeconds(2.7f);
-        }
-    }
-
     private void ClearCurrentActivity()
     {
-        if (currentActivity?.actionType == OfficeActionType.PhoneCall
-            && activePhoneCaller == this)
-            activePhoneCaller = null;
         crowd?.ClearDestination(this);
         currentActivity = null;
         trackedActivityDeadline = 0f;

@@ -49,8 +49,8 @@ public sealed class OfficeEpisodePlanner
                 + "Use only agent ids from the context. Keep personalities consistent and make "
                 + "specific situations develop across beats: observations, misunderstandings, "
                 + "small favors, work discoveries, humor, support, plans, and consequences. "
-                + "At least 70% of the beats must be conversations. Include exactly one phone "
-                + "beat and at most one activity-only beat. Put visible physical actions inside "
+                + "At least 70% of the beats must be conversations. Include at most one "
+                + "activity-only beat. Put visible physical actions inside "
                 + "conversation beats when possible. Conversations have 2-4 people. Use 3-4 "
                 + "people at most once in this pack, only when their current states "
                 + "suggest they are gathered or sharing a social area. Two-person conversations "
@@ -62,8 +62,7 @@ public sealed class OfficeEpisodePlanner
                 + "Match the visible mood; use anger only for genuine conflict. "
                 + "The Time line in Office context is authoritative. Treat remembered times "
                 + "as historical and never replace the current weekday or time of day with them. "
-                + "A phone beat is an incoming call from someone outside the office and has one "
-                + "person with 2-3 one-sided lines; never address a listed coworker. Actions with timing before "
+                + "Actions with timing before "
                 + "happen before dialogue; actions with timing after happen after it. If a line "
                 + "claims an immediate action such as 'I'll check now', include a matching after "
                 + "action for that speaker, otherwise do not say it. "
@@ -107,7 +106,7 @@ public sealed class OfficeEpisodePlanner
                 + "Return JSON only with this compact schema: "
                 + "{\"decision\":null|{\"author\":string,\"question\":string,"
                 + "\"options\":[{\"label\":string,\"reaction\":string,\"consequence\":string}]},"
-                + "\"beats\":[{\"id\":string,\"kind\":\"conversation|phone|activity\","
+                + "\"beats\":[{\"id\":string,\"kind\":\"conversation|activity\","
                 + "\"topic\":string,\"delay\":number,\"people\":[string],"
                 + "\"thought\":{\"who\":string,\"text\":string},"
                 + "\"actions\":[{\"who\":string,\"type\":string,\"target\":string,"
@@ -285,7 +284,7 @@ public sealed class OfficeEpisodePlanner
         for (int i = 0; i < limit; i++)
         {
             OfficeEpisodeBeat beat = ValidateBeat(
-                dto.beats[i], workers, knownAgents, availableActions,
+                dto.beats[i], knownAgents, availableActions,
                 packTopics, packLines);
             if (beat == null)
                 continue;
@@ -367,7 +366,6 @@ public sealed class OfficeEpisodePlanner
     }
 
     private OfficeEpisodeBeat ValidateBeat(EpisodeBeatDTO raw,
-        List<AIWorkerAgent> workers,
         Dictionary<string, string> knownAgents,
         HashSet<OfficeActionType> availableActions,
         List<string> packTopics,
@@ -376,7 +374,7 @@ public sealed class OfficeEpisodePlanner
         if (raw == null || string.IsNullOrWhiteSpace(raw.kind))
             return null;
         string kind = raw.kind.Trim().ToLowerInvariant();
-        if (kind != "conversation" && kind != "phone" && kind != "activity")
+        if (kind != "conversation" && kind != "activity")
             return null;
 
         List<string> people = NormalizePeople(raw.people, knownAgents);
@@ -408,18 +406,6 @@ public sealed class OfficeEpisodePlanner
                 if (string.Equals(lines[i - 1].agentId, lines[i].agentId,
                         StringComparison.OrdinalIgnoreCase))
                     return null;
-        }
-        else if (kind == "phone")
-        {
-            if (people.Count != 1 || lines.Count < 2)
-                return null;
-            lines.RemoveAll(line => !string.Equals(
-                line.agentId, people[0], StringComparison.OrdinalIgnoreCase));
-            if (lines.Count < 2 || MentionsOfficeCoworker(
-                    lines, people[0], workers))
-                return null;
-            while (lines.Count > 3)
-                lines.RemoveAt(lines.Count - 1);
         }
 
         List<OfficeEpisodeAction> actions =
@@ -572,7 +558,6 @@ public sealed class OfficeEpisodePlanner
                     out OfficeActionType actionType)
                 || availableActions == null
                 || !availableActions.Contains(actionType)
-                || actionType == OfficeActionType.PhoneCall
                 || actionType == OfficeActionType.ApproachColleague
                 || actionType == OfficeActionType.Custom)
                 continue;
@@ -607,13 +592,11 @@ public sealed class OfficeEpisodePlanner
         {
             OfficeActionType.WalkAround,
             OfficeActionType.Think,
-            OfficeActionType.CheckPhone,
-            OfficeActionType.PhoneCall
+            OfficeActionType.CheckPhone
         };
         foreach (OfficeActionPoint point in
                  GameObject.FindObjectsOfType<OfficeActionPoint>())
-            if (point != null && point.actionType != OfficeActionType.PhoneCall
-                && point.actionType != OfficeActionType.ApproachColleague
+            if (point != null && point.actionType != OfficeActionType.ApproachColleague
                 && point.actionType != OfficeActionType.Custom)
                 result.Add(point.actionType);
         return result;
@@ -695,22 +678,6 @@ public sealed class OfficeEpisodePlanner
         return true;
     }
 
-    private static bool MentionsOfficeCoworker(
-        List<OfficeEpisodeDialogueLine> lines, string callerId,
-        List<AIWorkerAgent> workers)
-    {
-        foreach (AIWorkerAgent worker in workers)
-        {
-            if (worker == null || string.Equals(
-                    worker.AgentId, callerId, StringComparison.OrdinalIgnoreCase))
-                continue;
-            foreach (OfficeEpisodeDialogueLine line in lines)
-                if (TextUtils.ContainsIgnoreCase(line?.line, worker.DisplayName))
-                    return true;
-        }
-        return false;
-    }
-
     private static bool ContainsStatReadout(string line)
     {
         if (string.IsNullOrWhiteSpace(line))
@@ -730,19 +697,11 @@ public sealed class OfficeEpisodePlanner
         if (beats == null || beats.Count == 0)
             return;
 
-        bool keptPhone = false;
         bool keptActivity = false;
         for (int i = beats.Count - 1; i >= 0; i--)
         {
             string kind = beats[i]?.kind ?? "";
-            if (string.Equals(kind, "phone", StringComparison.OrdinalIgnoreCase))
-            {
-                if (keptPhone)
-                    beats.RemoveAt(i);
-                else
-                    keptPhone = true;
-            }
-            else if (string.Equals(kind, "activity",
+            if (string.Equals(kind, "activity",
                          StringComparison.OrdinalIgnoreCase))
             {
                 if (keptActivity)
@@ -781,10 +740,6 @@ public sealed class OfficeEpisodePlanner
             int removable = beats.FindLastIndex(beat => string.Equals(
                 beat?.kind, "activity",
                 StringComparison.OrdinalIgnoreCase));
-            if (removable < 0)
-                removable = beats.FindLastIndex(beat => string.Equals(
-                    beat?.kind, "phone",
-                    StringComparison.OrdinalIgnoreCase));
             if (removable < 0)
                 break;
             beats.RemoveAt(removable);
@@ -1049,8 +1004,6 @@ public sealed class OfficeEpisodePlanner
             return OfficeActionType.Whiteboard;
         if (ContainsAny(lower, "plant", "water it"))
             return OfficeActionType.PlantCare;
-        if (ContainsAny(lower, "phone", "call"))
-            return OfficeActionType.PhoneCall;
         if (ContainsAny(lower, "message", "text ", "check my phone"))
             return OfficeActionType.CheckPhone;
         if (ContainsAny(lower, "desk", "report", "document", "data",

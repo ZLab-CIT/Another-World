@@ -9,7 +9,6 @@ public enum OfficeActionType
     BreakSpot,
     ChatSpot,
     MeetingRoom,
-    PhoneCall,
     Printer,
     Whiteboard,
     PlantCare,
@@ -20,7 +19,8 @@ public enum OfficeActionType
     Custom,
     InspectPackage,
     RepairWifi,
-    Celebrate
+    Celebrate,
+    PhoneCall
 }
 
 public enum OfficeFacingDirection

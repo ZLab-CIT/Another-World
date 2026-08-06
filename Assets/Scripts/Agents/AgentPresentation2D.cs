@@ -166,20 +166,6 @@ public class AgentPresentation2D : MonoBehaviour
             bubble.ShowDialogue(speakerName, content, speakerColor);
     }
 
-    public void ShowPhoneStatus(string speakerName, bool incoming, Color speakerColor)
-    {
-        AgentThoughtBubble bubble = EnsureSpeechBubble();
-        if (bubble != null)
-            bubble.ShowPhoneStatus(speakerName, incoming, speakerColor);
-    }
-
-    public void ShowPhoneSpeech(string speakerName, string content, Color speakerColor)
-    {
-        AgentThoughtBubble bubble = EnsureSpeechBubble();
-        if (bubble != null)
-            bubble.ShowPhoneDialogue(speakerName, content, speakerColor);
-    }
-
     public void HideSpeech()
     {
         if (speechBubble != null)
