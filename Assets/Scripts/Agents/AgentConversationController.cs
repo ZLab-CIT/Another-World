@@ -22,8 +22,9 @@ public class AgentConversationController : MonoBehaviour
     private readonly Dictionary<string, int> affinity = new();
     private AIWorkerAgent owner;
     private OfficeActionPoint ownedConversationAction;
-    private float nextSocialCheckTime;
+private float nextSocialCheckTime;
     private bool inConversation;
+    private string conversationHearingId;
     public bool IsInConversation => inConversation;
     public bool IsSociallyCoolingDown => Time.time < nextSocialCheckTime;
     public static int ActiveConversationCount
@@ -378,10 +379,19 @@ public class AgentConversationController : MonoBehaviour
         ConversationScript preparedScript)
     {
         LLMBrainService brain = LLMBrainService.Instance;
-        List<AIWorkerAgent> speakers = new() { owner };
+List<AIWorkerAgent> speakers = new() { owner };
         foreach (AIWorkerAgent participant in participants)
             if (participant != null && participant != owner)
                 speakers.Add(participant);
+
+        Vector2 hearingCenter = Vector2.zero;
+        foreach (AIWorkerAgent speaker in speakers)
+            if (speaker != null)
+                hearingCenter += speaker.GetPosition();
+        if (speakers.Count > 0)
+            hearingCenter /= speakers.Count;
+        conversationHearingId = OfficeConversationHearingTracker.RegisterConversation(
+            hearingCenter, topic, speakers);
 
         HideAll(speakers);
         List<ConversationTurn> completedTurns = new();
@@ -454,6 +464,14 @@ public class AgentConversationController : MonoBehaviour
                 StrengthenRelationships(speakers, completedSocialEvents, recordedTopic);
             }
             HideAll(speakers);
+            if (!string.IsNullOrEmpty(conversationHearingId))
+            {
+                OfficeConversationHearingTracker.End(conversationHearingId);
+                if (conversationSpoken)
+                    DistributeOverhearing(speakers, conversationHearingId);
+                OfficeConversationHearingTracker.Remove(conversationHearingId);
+                conversationHearingId = "";
+            }
             SetConversationCooldown(speakers, 2.5f);
             EndConversation(participants);
             ReleaseAfterConversation(speakers, conversationSpoken);
@@ -628,6 +646,13 @@ public class AgentConversationController : MonoBehaviour
     {
         Debug.Log("[Chat] " + speaker.DisplayName + ": " + line, speaker);
 
+        if (!string.IsNullOrEmpty(conversationHearingId))
+            OfficeConversationHearingTracker.AppendLine(conversationHearingId, line);
+        string revealKind = OfficePersonalRevealDetector.TryCatchReveal(line);
+        if (!string.IsNullOrWhiteSpace(revealKind))
+            RecordPersonalReveal(speaker, revealKind);
+
+
         OrientTowardSpeaker(speakers, speaker);
         HideAll(speakers);
         speaker.ShowSpeech(speaker.DisplayName, line, GetSpeakerColor(speaker));
@@ -711,8 +736,135 @@ public class AgentConversationController : MonoBehaviour
                     others.Append(", ");
                 others.Append(speaker.DisplayName);
             }
-            brain.Remember(listener.AgentId, "Talked with " + others + " about " + topic.Trim() + ".");
+brain.Remember(listener.AgentId, "Talked with " + others + " about " + topic.Trim() + ".");
         }
+    }
+
+    private static void RecordPersonalReveal(AIWorkerAgent speaker, string revealKind)
+    {
+        LLMBrainService brain = LLMBrainService.Instance;
+        if (speaker == null || brain == null)
+            return;
+        string subject = revealKind switch
+        {
+            "birthday" => "Today is " + speaker.DisplayName + "'s birthday.",
+            "breakup" => speaker.DisplayName + " shared that they have broken up with their partner.",
+            "date" => speaker.DisplayName + " shared that they have a new date or crush.",
+            "good news" => speaker.DisplayName + " shared exciting personal news.",
+            "bad news" => speaker.DisplayName + " shared sad or difficult personal news.",
+            _ => speaker.DisplayName + " shared something personal."
+        };
+        brain.RecordPersonalReveal(speaker.AgentId, subject);
+    }
+
+    private void DistributeOverhearing(List<AIWorkerAgent> speakers, string conversationId)
+    {
+        OfficeConversationHearingRecord record =
+            OfficeConversationHearingTracker.Get(conversationId);
+        if (record == null || speakers == null)
+            return;
+
+        OfficeCrowdCoordinator2D crowd = OfficeCrowdCoordinator2D.Instance;
+        LLMBrainService brain = LLMBrainService.Instance;
+        if (crowd == null || brain == null)
+            return;
+
+        bool privateOnly = UnityEngine.Random.value
+            < (owner != null ? owner.conversationSecrecyChance : 0.3f);
+        string names = JoinSpeakerNames(record.speakerNames);
+
+        foreach (AIWorkerAgent listener in crowd.Workers)
+        {
+            if (listener == null || listener == owner
+                || speakers.Contains(listener))
+                continue;
+            AgentConversationController controller = GetController(listener);
+            if (controller == null || controller.inConversation)
+                continue;
+            if (Vector2.Distance(listener.GetPosition(), record.center)
+                > listener.hearingRadius)
+                continue;
+
+            bool deliberate = listener.IsDeliberatelyListening
+                && string.Equals(listener.EavesdroppingConversation,
+                    conversationId, StringComparison.OrdinalIgnoreCase);
+            if (privateOnly && !deliberate)
+                continue;
+
+            float chance = deliberate
+                ? Mathf.Clamp01(listener.purposefulHearChance)
+                : Mathf.Clamp01(listener.accidentalHearChance
+                    * listener.HearingMultiplier);
+            if (UnityEngine.Random.value > chance)
+                continue;
+
+            string reliability = RollHearingReliability(listener);
+            string context = PickHeardContext(record);
+            string subject = BuildHeardSubject(names, context, reliability);
+            brain.RecordOverheardGossip(listener.AgentId, names, subject, reliability);
+            listener.ReactToHeardGossip(subject);
+            Debug.Log("[Heard] " + listener.DisplayName + " (" + reliability
+                + ") " + subject, listener);
+        }
+    }
+
+    private static string JoinSpeakerNames(List<string> names)
+    {
+        if (names == null || names.Count == 0)
+            return "some colleagues";
+        if (names.Count == 1)
+            return names[0];
+        StringBuilder joined = new();
+        for (int i = 0; i < names.Count; i++)
+        {
+            if (joined.Length > 0)
+                joined.Append(i == names.Count - 1 ? " and " : ", ");
+            joined.Append(names[i]);
+        }
+        return joined.ToString();
+    }
+
+    private static string PickHeardContext(OfficeConversationHearingRecord record)
+    {
+        if (record == null)
+            return "";
+        if (!string.IsNullOrWhiteSpace(record.topic))
+            return record.topic.Trim();
+        if (record.spokenLines != null && record.spokenLines.Count > 0)
+            return record.spokenLines[UnityEngine.Random.Range(
+                0, record.spokenLines.Count)];
+        return "";
+    }
+
+    private static string RollHearingReliability(AIWorkerAgent listener)
+    {
+        float roll = UnityEngine.Random.value;
+        if (roll < 0.6f)
+            return "accurate";
+        if (roll < 0.8f)
+            return "approximate";
+        if (listener != null && listener.DeceptiveGossiper && roll < 0.95f)
+            return "twisted";
+        return "misheard";
+    }
+
+    private static string BuildHeardSubject(string names, string context,
+        string reliability)
+    {
+        string quote = context;
+        if (quote.Length > 32)
+            quote = quote.Substring(0, 32) + "\u2026";
+        string labeled = "\"" + quote + "\"";
+        return reliability switch
+        {
+            "misheard" => "You think you heard " + names + " mention "
+                + labeled + ", but you were not sure.",
+            "approximate" => "You mostly caught " + names + " talking about "
+                + labeled + "; the details were unclear to you.",
+            "twisted" => "You overheard " + names + " about " + labeled
+                + " but plan to tell it with your own spin.",
+            _ => "You overheard " + names + " discussing " + labeled + "."
+        };
     }
 
     private List<AIWorkerAgent> FindNearbyParticipants(OfficeActionPoint action, float radius)

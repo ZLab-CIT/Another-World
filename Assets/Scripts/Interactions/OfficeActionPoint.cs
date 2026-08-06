@@ -20,7 +20,8 @@ public enum OfficeActionType
     InspectPackage,
     RepairWifi,
     Celebrate,
-    PhoneCall
+    PhoneCall,
+    Eavesdrop
 }
 
 public enum OfficeFacingDirection

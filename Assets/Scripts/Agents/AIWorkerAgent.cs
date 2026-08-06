@@ -151,6 +151,24 @@ public class AIWorkerAgent : MonoBehaviour
     [Tooltip("How long a planned conversation invitation remains valid.")]
     [Min(15f)] public float brainDirectiveTtl = 45f;
 
+    [Header("Overhearing & Gossip")]
+    [Tooltip("Radius in which this worker can overhear a nearby conversation it is not part of.")]
+    [Min(0.5f)] public float hearingRadius = 2.6f;
+    [Tooltip("Chance to catch a line when accidentally near a conversation that is not private.")]
+    [Range(0f, 1f)] public float accidentalHearChance = 0.35f;
+    [Tooltip("Chance to catch a private conversation while deliberately listening.")]
+    [Range(0f, 1f)] public float purposefulHearChance = 0.9f;
+    [Tooltip("Chance an idle worker quietly moves closer to listen, checked once per decision.")]
+    [Range(0f, 1f)] public float eavesdropChance = 0.04f;
+    [Tooltip("Max distance at which an active conversation can trigger deliberate listening.")]
+    [Min(1f)] public float eavesdropTriggerRadius = 5f;
+    [Tooltip("Chance a conversation is so private that nobody passing by catches it.")]
+    [Range(0f, 1f)] public float conversationSecrecyChance = 0.3f;
+
+    private float hearingMultiplier = 1f;
+    private bool deceptiveGossiper;
+    private bool jealousNature;
+
     private Rigidbody2D rb;
     private OfficeWorkerMotor2D motor;
     private AgentPresentation2D presentation;
@@ -173,6 +191,7 @@ public class AIWorkerAgent : MonoBehaviour
     private OfficeActionPoint invitedSocialAction;
     private string invitedBy;
     private float invitationExpiry = -1f;
+    private string eavesdroppingConversation;
 
     private AgentActivity currentActivity;
     private OfficeActionPoint lastFinishedDesk;
@@ -294,6 +313,7 @@ public class AIWorkerAgent : MonoBehaviour
         emotionDisplay.Bind(this, presentation);
         stateTimer = Random.Range(0.2f, 1f);
         ResetMovementLiveness();
+        UpdateHearingPersonality();
     }
 
     private void Update()
@@ -490,6 +510,9 @@ public class AIWorkerAgent : MonoBehaviour
         if (TryStartNextPlannedActivity())
             return;
 
+        if (TryStartEavesdropping())
+            return;
+
         OfficeActionPoint bestAction = PickUtilityAction();
         if (bestAction == null)
         {
@@ -505,6 +528,136 @@ public class AIWorkerAgent : MonoBehaviour
         }
 
         TryStartAction(bestAction);
+    }
+
+    public string EavesdroppingConversation => eavesdroppingConversation;
+    public bool IsDeliberatelyListening => !string.IsNullOrEmpty(eavesdroppingConversation);
+    public float HearingMultiplier => hearingMultiplier;
+    public bool DeceptiveGossiper => deceptiveGossiper;
+
+    private void UpdateHearingPersonality()
+    {
+        hearingMultiplier = 1f;
+        deceptiveGossiper = false;
+        jealousNature = false;
+        if (profile == null || profile.Traits == null)
+            return;
+        foreach (string trait in profile.Traits)
+        {
+            string lower = (trait ?? "").Trim().ToLowerInvariant();
+            if (lower.Length == 0)
+                continue;
+            if (lower.Contains("curious") || lower.Contains("nosy")
+                || lower.Contains("inquisitive"))
+                hearingMultiplier += 0.5f;
+            if (lower.Contains("distracted") || lower.Contains("daydream")
+                || lower.Contains("absent-minded"))
+                hearingMultiplier = Mathf.Max(0.4f, hearingMultiplier - 0.4f);
+            if (lower.Contains("scheming") || lower.Contains("manipulative")
+                || lower.Contains("dramatic") || lower.Contains("secretive"))
+                deceptiveGossiper = true;
+            if (lower.Contains("jealous") || lower.Contains("envious"))
+                jealousNature = true;
+        }
+    }
+
+    private bool TryStartEavesdropping()
+    {
+        if (conversation != null && conversation.IsInConversation)
+            return false;
+        if (UnityEngine.Random.value > eavesdropChance * hearingMultiplier)
+            return false;
+
+        OfficeConversationHearingRecord target =
+            OfficeConversationHearingTracker.FindNearestActive(
+                GetPosition(),
+                Mathf.Max(eavesdropTriggerRadius, hearingRadius + 2f));
+        if (target == null || target.speakerNames == null
+            || target.speakerNames.Contains(DisplayName))
+            return false;
+        if (!TryPlanEavesdropSpot(target, out Vector2 spot))
+            return false;
+
+        InterruptCurrentAction();
+        eavesdroppingConversation = target.conversationId;
+        currentActivity = new AgentActivity
+        {
+            actionType = OfficeActionType.Eavesdrop,
+            destinationMode = OfficeDestinationMode.FreePosition,
+            destination = spot,
+            duration = UnityEngine.Random.Range(9f, 14f),
+            reason = "quietly listen to a nearby conversation"
+        };
+        crowd?.ReserveDestination(this, spot);
+        state = WorkerState.Moving;
+        ShowActivityThought("\u201CWhat are they talking about?\u201D");
+        return true;
+    }
+
+    private bool TryPlanEavesdropSpot(OfficeConversationHearingRecord target,
+        out Vector2 spot)
+    {
+        spot = GetPosition();
+        if (grid == null || target == null || crowd == null)
+            return false;
+
+        float minSpeakerDistance = Mathf.Max(1f, colleagueStopDistance * 1.1f);
+        for (int i = 0; i < 12; i++)
+        {
+            Vector2 direction = UnityEngine.Random.insideUnitCircle.normalized;
+            if (direction.sqrMagnitude < 0.1f)
+                direction = Vector2.right;
+            float distance = Mathf.Lerp(
+                Mathf.Max(0.6f, minSpeakerDistance),
+                Mathf.Max(hearingRadius, minSpeakerDistance + 0.4f),
+                UnityEngine.Random.value);
+            Vector2 requested = target.center + direction * distance;
+            if (!grid.TryFindNearestWalkable(
+                    requested, navigationRadius, out Vector2 candidate))
+                continue;
+            bool tooCloseToSpeaker = false;
+            foreach (AIWorkerAgent worker in crowd.Workers)
+            {
+                if (worker == null || worker == this)
+                    continue;
+                if (target.speakerNames != null
+                    && target.speakerNames.Contains(worker.DisplayName)
+                    && Vector2.Distance(candidate, worker.GetPosition()) < minSpeakerDistance)
+                {
+                    tooCloseToSpeaker = true;
+                    break;
+                }
+            }
+            if (tooCloseToSpeaker)
+                continue;
+            if (!IsFreeDestinationAvailable(candidate))
+                continue;
+            if (!navigation.Plan(candidate))
+                continue;
+
+            spot = candidate;
+            return true;
+        }
+        return false;
+    }
+
+    public void ReactToHeardGossip(string subject)
+    {
+        if (string.IsNullOrWhiteSpace(subject))
+            return;
+
+        ShowThought(subject);
+        AgentEmotion? emotion = InferTextEmotion(subject, false);
+        if (jealousNature && (emotion == AgentEmotion.Happy
+            || emotion == AgentEmotion.Lol
+            || emotion == AgentEmotion.Romantic))
+        {
+            emotion = UnityEngine.Random.value < 0.5f
+                ? AgentEmotion.Angry : AgentEmotion.Surprised;
+            currentEmotion = emotion.Value;
+            emotionHoldUntil = Time.time + 6f;
+            emotionDisplay?.SetEmotion(currentEmotion);
+        }
     }
 
     private void TickEmotion()
@@ -1286,6 +1439,7 @@ public class AIWorkerAgent : MonoBehaviour
             case OfficeActionType.Think: return "pause to think";
             case OfficeActionType.CheckPhone: return "check your phone";
             case OfficeActionType.ApproachColleague: return "approach a colleague";
+            case OfficeActionType.Eavesdrop: return "quietly listen in on a conversation";
             case OfficeActionType.InspectPackage: return "inspect the package";
             case OfficeActionType.RepairWifi: return "check the Wi-Fi router";
             case OfficeActionType.Celebrate: return "celebrate with coworkers";
@@ -1475,6 +1629,15 @@ public class AIWorkerAgent : MonoBehaviour
             ? Mathf.Max(0.1f, currentActivity.duration)
             : 1f;
         OfficeActionType startedType = currentActivity?.actionType ?? OfficeActionType.Think;
+        if (startedType == OfficeActionType.Eavesdrop)
+        {
+            if (string.IsNullOrEmpty(eavesdroppingConversation)
+                || !OfficeConversationHearingTracker.IsActive(eavesdroppingConversation))
+            {
+                eavesdroppingConversation = null;
+                stateTimer = Mathf.Min(stateTimer, 3.5f);
+            }
+        }
         if (!string.IsNullOrWhiteSpace(currentActivity?.sequenceId))
         {
             activeSequenceId = currentActivity.sequenceId;
@@ -1907,6 +2070,9 @@ public class AIWorkerAgent : MonoBehaviour
             case OfficeActionType.ApproachColleague:
                 ApplyEffects(0f, 0f, 4f, 0f);
                 break;
+            case OfficeActionType.Eavesdrop:
+                ApplyEffects(0f, 2f, -1f, 0f);
+                break;
         }
     }
 
@@ -1921,6 +2087,7 @@ public class AIWorkerAgent : MonoBehaviour
 
     private void ClearCurrentActivity()
     {
+        eavesdroppingConversation = null;
         crowd?.ClearDestination(this);
         currentActivity = null;
         trackedActivityDeadline = 0f;

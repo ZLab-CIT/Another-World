@@ -612,6 +612,53 @@ public class LLMBrainService : MonoBehaviour
             worldEvents.RemoveAt(0);
     }
 
+    public void RecordOverheardGossip(string agentId, string sourceNames,
+        string subject, string reliability)
+    {
+        AgentProfile profile = GetProfile(agentId);
+        if (profile == null || string.IsNullOrWhiteSpace(subject)
+            || IsStaleSnackMystery(subject))
+            return;
+        profile.socialMemory.Add(new SocialMemoryEntry
+        {
+            type = "gossip",
+            sourceAgent = string.IsNullOrWhiteSpace(sourceNames)
+                ? "some coworkers" : sourceNames.Trim(),
+            targetAgent = "",
+            subject = subject.Trim(),
+            isPrivate = true,
+            status = string.IsNullOrWhiteSpace(reliability)
+                ? "accurate" : reliability.Trim()
+        });
+        while (profile.socialMemory.Count > 20)
+            profile.socialMemory.RemoveAt(0);
+        Remember(agentId, subject);
+    }
+
+    public void RecordPersonalReveal(string agentId, string subject)
+    {
+        AgentProfile profile = GetProfile(agentId);
+        if (profile == null || string.IsNullOrWhiteSpace(subject)
+            || IsStaleSnackMystery(subject))
+            return;
+        foreach (SocialMemoryEntry entry in profile.socialMemory)
+            if (entry != null && entry.status == "scheduled"
+                && TextUtils.TextSimilarity(entry.subject, subject) >= 0.7f)
+                return;
+        profile.socialMemory.Add(new SocialMemoryEntry
+        {
+            type = "plan",
+            sourceAgent = agentId,
+            targetAgent = "",
+            subject = subject.Trim(),
+            isPrivate = true,
+            status = "scheduled"
+        });
+        while (profile.socialMemory.Count > 20)
+            profile.socialMemory.RemoveAt(0);
+        RememberWorldEvent(subject);
+    }
+
     public void RecordOfficeStoryStarted(string storyId)
     {
         RecordOfficeStoryStarted(storyId, "", null);
