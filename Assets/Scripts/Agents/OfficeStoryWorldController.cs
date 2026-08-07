@@ -58,6 +58,9 @@ public sealed class OfficeStoryWorldController : MonoBehaviour
 
     private void Update()
     {
+        if (WorldSimulationPanel.IsPaused)
+            return;
+
         LLMBrainService brain = LLMBrainService.Instance;
         if (brain == null)
             return;
@@ -108,22 +111,12 @@ public sealed class OfficeStoryWorldController : MonoBehaviour
         return catalog != null && catalog.Find(storyId) != null;
     }
 
-    public bool HasActiveStory
+    public void ResetWorldState()
     {
-        get
-        {
-            LLMBrainService brain = LLMBrainService.Instance;
-            if (brain == null)
-                return false;
-            foreach (string storyId in props.Keys)
-            {
-                PersistedOfficeStoryState state =
-                    brain.GetOfficeStoryState(storyId);
-                if (state != null && state.started > state.resolved)
-                    return true;
-            }
-            return false;
-        }
+        hiddenAftermath.Clear();
+        foreach (KeyValuePair<string, RuntimeProp> pair in props)
+            ApplyStage(pair.Value, 0);
+        restored = false;
     }
 
     public void ShowStage(string storyId, int stage)

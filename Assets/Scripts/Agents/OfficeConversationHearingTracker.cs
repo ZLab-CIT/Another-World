@@ -7,7 +7,6 @@ public sealed class OfficeConversationHearingRecord
     public string conversationId;
     public Vector2 center;
     public string topic;
-    public List<string> speakerIds;
     public List<string> speakerNames;
     public List<string> spokenLines;
     public float endsAt;
@@ -26,7 +25,6 @@ public static class OfficeConversationHearingTracker
         record.conversationId = System.Guid.NewGuid().ToString("N");
         record.center = center;
         record.topic = topic ?? "";
-        record.speakerIds = new List<string>();
         record.speakerNames = new List<string>();
         record.spokenLines = new List<string>();
         if (speakers != null)
@@ -34,7 +32,6 @@ public static class OfficeConversationHearingTracker
             {
                 if (speaker == null)
                     continue;
-                record.speakerIds.Add(speaker.AgentId);
                 record.speakerNames.Add(speaker.DisplayName);
             }
         record.endsAt = Time.time + 45f;
@@ -78,6 +75,11 @@ public static class OfficeConversationHearingTracker
     public static OfficeConversationHearingRecord Get(string conversationId)
     {
         return Find(conversationId);
+    }
+
+    public static void ClearAll()
+    {
+        ActiveConversations.Clear();
     }
 
     public static OfficeConversationHearingRecord FindNearestActive(Vector2 from,

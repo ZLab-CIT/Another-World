@@ -101,6 +101,28 @@ public class OfficeEventDirector : MonoBehaviour
         workers.Remove(worker);
     }
 
+    public void ResetEpisodeProviderRetry()
+    {
+        loggedMissingEpisodeProvider = false;
+        nextEpisodeRefillTime = 0f;
+    }
+
+    public void ResetDirectorState()
+    {
+        episodeReserve.Clear();
+        pendingEpisode = null;
+        episodeRefillInFlight = false;
+        clearReserveAfterPendingEpisode = false;
+        episodeReserveRestored = false;
+        completedBirthdayEvents.Clear();
+        recentStoryIds.Clear();
+        nextEpisodeTime = 0f;
+        nextEpisodeRefillTime = 0f;
+        nextRandomEventTime = 0f;
+        consecutiveEpisodeRefillFailures = 0;
+        ClearPendingEpisodeThought();
+    }
+
     public void NotifyVendingEvent(VendingEventSO evt, List<AIWorkerAgent> targets)
     {
         if (evt == null)
@@ -134,6 +156,9 @@ public class OfficeEventDirector : MonoBehaviour
 
     private void Update()
     {
+        if (WorldSimulationPanel.IsPaused)
+            return;
+
         TickEpisodeDirector();
 
         if (Time.time >= nextCheckTime)
@@ -198,7 +223,7 @@ public class OfficeEventDirector : MonoBehaviour
                 {
                     loggedMissingEpisodeProvider = true;
                     Debug.LogWarning("[Episode director] no remote provider is ready. "
-                        + "Set GROQ_API_KEY or GEMINI_API_KEY and restart Unity. "
+                        + "Enter a Groq or Gemini API key in the WORLD CONTROL panel. "
                         + "Utility movement remains active.", this);
                 }
                 nextEpisodeRefillTime = Time.time + 60f;

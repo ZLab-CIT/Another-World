@@ -174,6 +174,15 @@ public sealed class AgentBrainEndpoint
     public string model;
 }
 
+public sealed class RuntimeProviderOverride
+{
+    public string apiKeyEnvironmentVariable;
+    [Tooltip("Leave empty to keep the provider's configured model.")]
+    public string model;
+    [Tooltip("Leave empty to keep the environment-variable key.")]
+    public string apiKey;
+}
+
 public class LLMBrainService : MonoBehaviour
 {
     private sealed class EpisodeBackendState
@@ -237,6 +246,9 @@ public class LLMBrainService : MonoBehaviour
 
     [Header("Agent Personalities")]
     [SerializeField] private AgentPersonalityEntry[] personalities;
+
+    private static readonly Dictionary<string, string> runtimeApiKeyOverrides = new();
+    private static readonly Dictionary<string, string> runtimeModelOverrides = new();
 
     private ILLMBackend backend;
     private readonly Dictionary<string, ILLMBackend> backendsByAgent =
@@ -359,7 +371,8 @@ public class LLMBrainService : MonoBehaviour
 
     private void Update()
     {
-        worldUnixSeconds += Time.unscaledDeltaTime * Mathf.Max(1f, simulationTimeScale);
+        if (!WorldSimulationPanel.IsPaused)
+            worldUnixSeconds += Time.unscaledDeltaTime * Mathf.Max(1f, simulationTimeScale);
         if (Time.unscaledTime < nextStateSaveTime)
             return;
 
@@ -393,7 +406,6 @@ public class LLMBrainService : MonoBehaviour
         return profile;
     }
 
-    public bool EnableSocialReplies => enableSocialReplies;
     public bool HasRemoteEpisodeProvider => episodeBackends.Count > 0;
     public double WorldUnixSeconds => worldUnixSeconds;
     public DateTime WorldDateTime
@@ -426,18 +438,31 @@ public class LLMBrainService : MonoBehaviour
         return Math.Max(0f, realSeconds) * Mathf.Max(1f, simulationTimeScale);
     }
 
-    public float RealSecondsUntil(double targetWorldTime)
-    {
-        return Mathf.Max(0f, (float)((targetWorldTime - worldUnixSeconds)
-            / Mathf.Max(1f, simulationTimeScale)));
-    }
-
     public ILLMBackend GetBackendForAgent(string agentId)
     {
         if (!string.IsNullOrWhiteSpace(agentId)
             && backendsByAgent.TryGetValue(agentId.Trim(), out ILLMBackend assigned))
             return assigned;
         return backend;
+    }
+
+    private IEnumerable<(EpisodeBackendState Provider, int Index)>
+        EnumerateAvailableEpisodeProviders(int startIndex)
+    {
+        int providerCount = episodeBackends.Count;
+        if (providerCount == 0)
+            yield break;
+
+        int start = Mathf.Abs(startIndex) % providerCount;
+        for (int offset = 0; offset < providerCount; offset++)
+        {
+            int index = (start + offset) % providerCount;
+            EpisodeBackendState provider = episodeBackends[index];
+            if (provider?.backend == null
+                || Time.unscaledTime < provider.circuitOpenUntil)
+                continue;
+            yield return (provider, index);
+        }
     }
 
     public ILLMBackend GetBackendForConversation(
@@ -463,21 +488,11 @@ public class LLMBrainService : MonoBehaviour
             }
         }
 
-        if (episodeBackends.Count > 0)
+        foreach ((EpisodeBackendState provider, int index) in
+            EnumerateAvailableEpisodeProviders(nextConversationBackendIndex))
         {
-            int start = Mathf.Abs(nextConversationBackendIndex)
-                % episodeBackends.Count;
-            for (int offset = 0; offset < episodeBackends.Count; offset++)
-            {
-                int index = (start + offset) % episodeBackends.Count;
-                EpisodeBackendState provider = episodeBackends[index];
-                if (provider?.backend == null || provider.backend.IsLocal
-                    || Time.unscaledTime < provider.circuitOpenUntil)
-                    continue;
-                nextConversationBackendIndex =
-                    (index + 1) % episodeBackends.Count;
-                return provider.backend;
-            }
+            nextConversationBackendIndex = (index + 1) % episodeBackends.Count;
+            return provider.backend;
         }
 
         return GetBackendForAgent(initiatorAgentId);
@@ -494,17 +509,6 @@ public class LLMBrainService : MonoBehaviour
         nextRoutineConversationTime = Time.unscaledTime
             + Mathf.Max(8f, routineConversationIntervalSeconds);
         return true;
-    }
-
-    public bool CanStartRoutineConversation
-    {
-        get
-        {
-            if (!enableSocialReplies || !HasAnyBackend
-                || Time.unscaledTime < nextRoutineConversationTime)
-                return false;
-            return true;
-        }
     }
 
     public void RegisterRuntimeAgent(AIWorkerAgent agent)
@@ -777,15 +781,9 @@ public class LLMBrainService : MonoBehaviour
             return null;
 
         int providerCount = episodeBackends.Count;
-        int startIndex = Mathf.Abs(nextEpisodeBackendIndex) % providerCount;
-        for (int offset = 0; offset < providerCount; offset++)
+        foreach ((EpisodeBackendState provider, int index) in
+            EnumerateAvailableEpisodeProviders(nextEpisodeBackendIndex))
         {
-            int index = (startIndex + offset) % providerCount;
-            EpisodeBackendState provider = episodeBackends[index];
-            if (provider?.backend == null
-                || Time.unscaledTime < provider.circuitOpenUntil)
-                continue;
-
             OfficeEpisodePack pack = await episodePlanner.GenerateEpisodePackAsync(
                 provider.backend, provider.label, workers,
                 Mathf.Clamp(requestedCount, 4, 8),
@@ -858,13 +856,9 @@ public class LLMBrainService : MonoBehaviour
             maxRetries = 0,
             highPriority = false
         };
-        for (int i = 0; i < episodeBackends.Count; i++)
+        foreach ((EpisodeBackendState provider, int _) in
+            EnumerateAvailableEpisodeProviders(nextEpisodeBackendIndex))
         {
-            EpisodeBackendState provider = episodeBackends[
-                (nextEpisodeBackendIndex + i) % episodeBackends.Count];
-            if (provider?.backend == null
-                || Time.unscaledTime < provider.circuitOpenUntil)
-                continue;
             try
             {
                 string raw = await provider.backend.CompleteAsync(messages, options);
@@ -999,11 +993,131 @@ public class LLMBrainService : MonoBehaviour
             profile.memory.RemoveAt(0);
     }
 
-    private string ResolveApiKey()
+    private string ResolveApiKey(string envVariableName = null)
     {
+        string envVar = string.IsNullOrWhiteSpace(envVariableName)
+            ? apiKeyEnvironmentVariable : envVariableName.Trim();
         if (!RequiresApiKey())
             return "";
-        return ResolveEnvironmentVariable(apiKeyEnvironmentVariable);
+        // Deployed builds (especially WebGL) cannot rely on OS environment
+        // variables. Keys entered in the WORLD CONTROL panel take precedence,
+        // and are kept only in memory so they never persist to browser storage.
+        if (runtimeApiKeyOverrides.TryGetValue(envVar, out string runtimeKey)
+            && !string.IsNullOrWhiteSpace(runtimeKey))
+            return runtimeKey;
+        return ResolveEnvironmentVariable(envVar);
+    }
+
+    private string ResolveRuntimeModel(string envVariableName)
+    {
+        if (string.IsNullOrWhiteSpace(envVariableName))
+            return "";
+        if (runtimeModelOverrides.TryGetValue(envVariableName.Trim(), out string runtimeModel)
+            && !string.IsNullOrWhiteSpace(runtimeModel))
+            return runtimeModel;
+        return "";
+    }
+
+    public bool HasUsableApiKey
+    {
+        get
+        {
+            if (!RequiresApiKey())
+                return true;
+            return !string.IsNullOrWhiteSpace(ResolveApiKey());
+        }
+    }
+
+    public string DefaultApiKeyEnvironmentVariable => apiKeyEnvironmentVariable;
+
+    public void ApplyRuntimeProviders(params RuntimeProviderOverride[] overrides)
+    {
+        foreach (RuntimeProviderOverride posOverride in overrides)
+        {
+            if (posOverride == null)
+                continue;
+            bool stale = string.IsNullOrWhiteSpace(posOverride.model)
+                && string.IsNullOrWhiteSpace(posOverride.apiKey);
+            if (stale && runtimeApiKeyOverrides.ContainsKey(posOverride.apiKeyEnvironmentVariable))
+                runtimeApiKeyOverrides.Remove(posOverride.apiKeyEnvironmentVariable);
+            if (posOverride.model != null)
+            {
+                if (string.IsNullOrWhiteSpace(posOverride.model))
+                    runtimeModelOverrides.Remove(posOverride.apiKeyEnvironmentVariable);
+                else
+                    runtimeModelOverrides[posOverride.apiKeyEnvironmentVariable] = posOverride.model.Trim();
+            }
+            if (posOverride.apiKey != null)
+            {
+                if (string.IsNullOrWhiteSpace(posOverride.apiKey.Trim()))
+                    runtimeApiKeyOverrides.Remove(posOverride.apiKeyEnvironmentVariable);
+                else
+                    runtimeApiKeyOverrides[posOverride.apiKeyEnvironmentVariable] = posOverride.apiKey.Trim();
+            }
+        }
+
+        loggedMissingApiKey = false;
+        string resolved = ResolveApiKey();
+        if (RequiresApiKey() && string.IsNullOrWhiteSpace(resolved))
+        {
+            backend = null;
+            ConfigureAgentBrains();
+            Debug.Log(nameof(LLMBrainService) +
+                " API key cleared; remote inference disabled.", this);
+            return;
+        }
+
+        string usedModel = ResolveRuntimeModel(apiKeyEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(usedModel))
+            usedModel = model;
+        backend = new OpenAICompatibleBackend(baseUrl, resolved, usedModel);
+        ConfigureAgentBrains();
+        foreach (EpisodeBackendState provider in episodeBackends)
+            provider.circuitOpenUntil = 0f;
+        OfficeEventDirector.Instance?.ResetEpisodeProviderRetry();
+        Debug.Log(nameof(LLMBrainService) + " API key applied; remoteEpisodeProviders=" +
+            episodeBackends.Count, this);
+    }
+
+    public void RestartWorld()
+    {
+        foreach (KeyValuePair<string, AIWorkerAgent> entry in runtimeAgents)
+            if (entry.Value != null)
+                entry.Value.ResetToFreshWorldState();
+
+        foreach (AgentProfile profile in new HashSet<AgentProfile>(profiles.Values))
+            if (profile != null)
+            {
+                profile.memory.Clear();
+                profile.socialMemory.Clear();
+                profile.recentTopics.Clear();
+                profile.recentOpenings.Clear();
+                profile.recentUtterances.Clear();
+            }
+
+        worldEvents.Clear();
+        relationships.Clear();
+        officeStories.Clear();
+        furniture.Clear();
+        persistedEpisodeReserve.Clear();
+        runtimeStates.Clear();
+        recentGlobalTopics.Clear();
+        recentGlobalUtterances.Clear();
+        restoredAgentIds.Clear();
+        announcedBirthdays.Clear();
+        worldUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        persistedState = new WorldStateSnapshot();
+        startedOnNewCalendarDay = false;
+        nextRoutineConversationTime = 0f;
+        nextEpisodeBackendIndex = 0;
+        nextConversationBackendIndex = 0;
+
+        WorldStateStore.Delete();
+        OfficeConversationHearingTracker.ClearAll();
+        OfficeEventDirector.Instance?.ResetDirectorState();
+        OfficeStoryWorldController.Instance?.ResetWorldState();
+        SaveState();
+        Debug.Log(nameof(LLMBrainService) + " world restarted from scratch.", this);
     }
 
     private void ConfigureAgentBrains()
@@ -1025,17 +1139,23 @@ public class LLMBrainService : MonoBehaviour
                 || string.IsNullOrWhiteSpace(slot.model))
                 continue;
 
-            string key = ResolveEnvironmentVariable(slot.apiKeyEnvironmentVariable);
+            string slotEnvVar = string.IsNullOrWhiteSpace(slot.apiKeyEnvironmentVariable)
+                ? "" : slot.apiKeyEnvironmentVariable.Trim();
+            string key = ResolveApiKey(slotEnvVar);
             if (RequiresApiKey(slot.baseUrl) && string.IsNullOrWhiteSpace(key))
             {
                 Debug.LogWarning("[LLMBrainService] brain " +
                     (string.IsNullOrWhiteSpace(slot.label) ? slot.model : slot.label) +
-                    " disabled because its API key environment variable is empty.", this);
+                    " disabled because its API key is empty.", this);
                 continue;
             }
 
+            string slotModel = ResolveRuntimeModel(slotEnvVar);
+            if (string.IsNullOrWhiteSpace(slotModel))
+                slotModel = slot.model;
+
             ILLMBackend slotBackend = new OpenAICompatibleBackend(
-                slot.baseUrl, key, slot.model);
+                slot.baseUrl, key, slotModel);
             string providerLabel = string.IsNullOrWhiteSpace(slot.label)
                 ? slot.model : slot.label.Trim();
             if (!slotBackend.IsLocal)
@@ -1472,7 +1592,7 @@ public class LLMBrainService : MonoBehaviour
     }
 
     [ContextMenu("Test Connection")]
-    private async void TestConnection()
+    public async void TestConnection()
     {
         string resolvedApiKey = ResolveApiKey();
         if (RequiresApiKey() && string.IsNullOrWhiteSpace(resolvedApiKey))

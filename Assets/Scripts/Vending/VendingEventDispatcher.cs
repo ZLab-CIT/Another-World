@@ -36,8 +36,6 @@ public class VendingEventDispatcher : MonoBehaviour
     private VendingMachine vendingMachine;
     private readonly VendingEventCatalog catalog = new();
 
-    public IReadOnlyList<VendingEventSO> Events => events;
-
     private void Awake()
     {
         if (Instance != null && Instance != this)
@@ -93,21 +91,6 @@ public class VendingEventDispatcher : MonoBehaviour
                 (evt is IVendingGachaEvent) == cosmetic
                 && (includeHatsInGacha || evt is not VendingHatEventSO),
             GetEventWeight);
-    }
-
-    public void ShowOfflineCoupon(string userId, OfflineCouponReward reward)
-    {
-        if (announcer == null)
-            return;
-
-        string title = string.IsNullOrEmpty(reward.displayName)
-            ? "Offline Coupon"
-            : reward.displayName;
-        string subtitle = "User " + userId + " receives " + reward.couponId;
-        if (!string.IsNullOrEmpty(reward.description))
-            subtitle += ": " + reward.description;
-
-        announcer.Show(title, subtitle, null, 2f);
     }
 
     public void ShowWorldAnnouncement(string title, string subtitle, Sprite icon = null,

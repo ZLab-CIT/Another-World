@@ -133,7 +133,29 @@ Run `Tools/Configure-LLMKeys.ps1` once to store either or both keys in the
 current Windows user's environment. Exit and reopen Unity after changing
 environment variables so the Editor cannot retain an older process-level key.
 
-Other OpenAI-compatible providers can be configured on `LLMBrainService`:
+In deployed builds (Windows player without a console, or WebGL in a browser)
+there is no PowerShell or OS user environment, so the keys are never included
+in the build. Open the **WORLD CONTROL** panel at the top-right corner of the
+game, paste the Groq or Gemini key into the `LLM API KEY` field and press
+**Apply**. The key is kept only in memory for the current session and is never
+written to the browser/player local data, so it cannot be read from
+`localStorage` and disappears on reload. Without a key the simulation simply
+runs without LLM-driven dialogue; nothing is sent to any provider. An optional
+`Admin Password` on `WorldSimulationPanel` can hide the key fields behind an
+**Unlock** prompt (leave empty to keep the panel open).
+
+The same panel contains simulation controls:
+
+- **Play/Pause**: one toggle. Press it to start the world; press it again to
+  freeze it — agents stop deciding, moving, and talking, animations stop, and
+  the world clock stops advancing. Pressing again resumes exactly.
+- **Restart world** deletes the saved state (memory, relationships, stories,
+  runtime) and resets every worker to its original desk for a fresh day one.
+
+Everything above uses an OpenAI-compatible provider. Groq and Gemini are the
+preconfigured defaults, but the project is not limited to them — the panel can
+be extended with extra **Model** + **API key** fields, and any OpenAI-compatible
+endpoint can be configured on `LLMBrainService`:
 
 - `Base Url`: endpoint root without `/chat/completions`
 - `Model`: provider model identifier
@@ -249,6 +271,12 @@ Unity creates its QR/newspaper panel automatically and connects through
 must be connected to the same network. If Windows Firewall asks, allow access
 on private networks only. Use `-Background` for unattended launches.
 
+To test the QR flow, make sure the phone and the PC running the project are on
+the same Wi-Fi/LAN network (not just the same router on guest isolation, and
+not over mobile data), and scan the QR with the phone's camera app, not an SMS
+or email scanner. The QR encodes `http://<pc-ip>:5074`, so it only works from
+devices that can reach that address.
+
 Edit `Assets/Resources/InteractionHub/DisplaySettings.asset` to change the QR
 tile corner, screen margin, panel size, QR size, overall scale, or canvas
 sorting order. Eyebrow, title, and body font sizes are configurable in the same
@@ -275,6 +303,9 @@ Prototype reward pages and QR codes are deliberately marked non-redeemable.
 No vending payment, face recognition, office badge, or real coupon API is used.
 
 ## Validation
+
+Build and deployment instructions, including the current WebGL limitations, are
+in `Docs/DEPLOYMENT.md`.
 
 Compile the scripts with:
 

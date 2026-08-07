@@ -21,16 +21,7 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
     private readonly HashSet<string> processedPhysicalEventIds =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<string> processedPhysicalEventOrder = new();
-    private VendingEventDispatcher dispatcher;
-    public event Action<PhysicalInteractionEvent, VendingEventSO> PhysicalEventAccepted;
-    public static PhysicalVirtualInteractionBridge Ensure()
-    {
-        if (Instance != null)
-            return Instance;
-
-        GameObject go = new(nameof(PhysicalVirtualInteractionBridge));
-        return go.AddComponent<PhysicalVirtualInteractionBridge>();
-    }
+private VendingEventDispatcher dispatcher;
 
     private void Awake()
     {
@@ -54,26 +45,9 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
         TriggerMockPhysicalSale(PickProduct(cosmetic: false));
     }
 
-    public void TriggerMockGachaSale()
+public void TriggerMockGachaSale()
     {
         TriggerPhysicalSale(PickProduct(cosmetic: true), defaultUserId);
-    }
-
-    public void TriggerMockOnlineMilestone(string userId)
-    {
-        string resolvedUserId = string.IsNullOrEmpty(userId) ? defaultUserId : userId;
-        IssueCoupon(resolvedUserId, new OfflineCouponReward
-        {
-            rewardType = OfflineRewardType.DiscountCoupon,
-            couponId = defaultCouponId,
-            displayName = defaultCouponName,
-            description = defaultCouponDescription
-        }, "mock-productivity-" + DateTime.Now.ToString("yyyy-MM-dd"));
-    }
-
-    public void TriggerMockOnlineMilestone()
-    {
-        TriggerMockOnlineMilestone(defaultUserId);
     }
 
     public void TriggerPhysicalSale(string productId, string userId)
@@ -121,8 +95,7 @@ public class PhysicalVirtualInteractionBridge : MonoBehaviour
         LogHistory("physical_sale: " + physicalEvent.productId + " -> virtual_event: "
             + evt.eventId + " user: " + physicalEvent.userId + " event: "
             + physicalEvent.eventId);
-        dispatcher.TriggerEvent(evt);
-        PhysicalEventAccepted?.Invoke(physicalEvent, evt);
+dispatcher.TriggerEvent(evt);
         OfficeInteractionHubClient.Instance?.RecordWorldEvent(
             "physical_vending", evt.displayName,
             evt.description, Array.Empty<string>());

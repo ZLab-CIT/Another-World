@@ -1,21 +1,11 @@
 using UnityEngine;
 
-public enum OfficeStoryKind
-{
-    Gossip,
-    SmallCrisis,
-    Discovery,
-    SharedPlan,
-    Celebration
-}
-
 [CreateAssetMenu(menuName = "Another World/Office Story Beat", fileName = "NewOfficeStory")]
 public class OfficeStoryBeatSO : ScriptableObject
 {
     [Header("Identity")]
     public string storyId;
     public string title = "Office Story";
-    public OfficeStoryKind kind;
     [Min(0.01f)] public float weight = 1f;
 
     [Header("Dialogue")]

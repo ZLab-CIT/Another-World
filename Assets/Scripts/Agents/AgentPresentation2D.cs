@@ -31,7 +31,6 @@ public class AgentPresentation2D : MonoBehaviour
     private float heldItemExpiry;
     private SortingGroup sortingGroup;
 
-    public bool ThoughtBubblesEnabled => thoughtBubblesEnabled;
     public bool IsHolding => heldItem != null;
     public Sprite GetEmotionSprite(AgentEmotion emotion)
     {

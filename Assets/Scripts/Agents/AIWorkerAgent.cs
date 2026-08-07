@@ -3,6 +3,69 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
 
+[System.Serializable]
+public sealed class AIScoringTuning
+{
+    [Header("Need / Urgency Weights")]
+    [Tooltip("Weight applied to an action's energy gain when energy is low.")]
+    public float energyUrgencyGain = 3f;
+    [Tooltip("Weight applied to an action's focus gain when focus is low.")]
+    public float focusUrgencyGain = 3f;
+    [Tooltip("Weight applied to an action's social gain when social is low.")]
+    public float socialUrgencyGain = 2.4f;
+
+    [Header("Routine Social Spots")]
+    public float socialTarget = 60f;
+    public float socialGradient = 0.65f;
+    public float socialCritical = 35f;
+    public float socialCriticalBonus = 18f;
+    public float socialSaturation = 75f;
+    public float socialSaturationPenalty = 0.3f;
+    public float socialCooldownPenalty = 40f;
+    public float chatSpotLowSocialBonus = 8f;
+    public float chatSpotNormalBonus = 2f;
+
+    [Header("Vending Machine")]
+    public float vendingBaseBonus = 6f;
+    public float vendingSnackScale = 12f;
+    public float vendingHoldingPenalty = 12f;
+
+    [Header("Coffee Machine")]
+    public float coffeeBaseBonus = 8f;
+    public float coffeeNeedScale = 14f;
+    public float coffeeHoldingPenalty = 10f;
+
+    [Header("Work Desk")]
+    public float deskSatisfactionScale = 40f;
+    public float deskLowEnergyPenalty = 100f;
+    public float deskLowFocusPenalty = 100f;
+    public float deskLowSocialPenalty = 50f;
+    public float deskRevisitPenalty = 90f;
+    public float deskLowEnergyThreshold = 25f;
+    public float deskLowFocusThreshold = 25f;
+    public float deskLowSocialThreshold = 15f;
+
+    [Header("Repeat & Plant Care")]
+    public float repeatDeskPenalty = 45f;
+    public float repeatOtherPenalty = 20f;
+    public float plantBaseBonus = 6f;
+    public float plantEnergyScale = 10f;
+    public float plantSocialScale = 5f;
+    public float plantOccupiedPenalty = 15f;
+
+    [Header("Schedule Fit")]
+    public float morningCoffeeFit = 22f;
+    public float morningDeskFit = 10f;
+    public float workDeskFit = 24f;
+    public float collaborationFit = 12f;
+    public float lunchBreakFit = 30f;
+    public float lunchDeskFit = -28f;
+    public float eveningBreakFit = 18f;
+    public float eveningDeskFit = -12f;
+    public float nightBreakFit = 22f;
+    public float nightDeskFit = -45f;
+}
+
 public sealed class ConversationIntent
 {
     public string initiatorAgentId;
@@ -41,7 +104,6 @@ public sealed class AgentActivity
     public string customActionLabel;
     public bool giveHeldItemToTarget;
     public bool interactionAttempted;
-    public bool interactionSucceeded;
     public bool highPriorityConversation;
     public ConversationScript preparedScript;
     public bool routineConversationReserved;
@@ -122,6 +184,10 @@ public class AIWorkerAgent : MonoBehaviour
     public float decisionDelay = 1f;
     public float randomness = 5f;
 
+    [Header("Scoring Weights")]
+    [Tooltip("Tunable weights that drive action selection. Leave defaults unless you want to retune behavior.")]
+    public AIScoringTuning scoringTuning = new();
+
     [Header("Item Handling")]
     [Min(0f)] public float coffeeHoldDuration = 30f;
     [Min(0f)] public float deskCoffeeLifetime = 30f;
@@ -184,6 +250,7 @@ public class AIWorkerAgent : MonoBehaviour
 
     private WorkerState state = WorkerState.Thinking;
     private float stateTimer;
+    private Vector3 initialPosition;
 
     private ConversationIntent conversationIntent;
     private float socialArrivalTime = -1f;
@@ -217,7 +284,6 @@ public class AIWorkerAgent : MonoBehaviour
         ? profile.AgentType
         : inferredAgentType;
     public string Birthday => profile != null ? profile.Birthday : "";
-    public float SecondsAtSocialPoint => socialArrivalTime < 0f ? 0f : Time.time - socialArrivalTime;
     public bool IsHolding => presentation != null && presentation.IsHolding;
     public AgentEmotion CurrentEmotion => currentEmotion;
     public bool CanJoinStoryBeat => CanAcceptStoryBeat();
@@ -226,10 +292,6 @@ public class AIWorkerAgent : MonoBehaviour
         : currentActivity != null ? GetActionLabel(currentActivity) : lastActionLabel;
     public SceneItemKind HeldItemKind => presentation?.HeldItem != null
         ? presentation.HeldItem.Kind : SceneItemKind.Unknown;
-    public string GetConversationSummary()
-    {
-        return profile != null ? profile.BuildConversationSummary() : DisplayName;
-    }
 
     public string GetEstablishedRelationships()
     {
@@ -295,6 +357,8 @@ public class AIWorkerAgent : MonoBehaviour
         if (grid == null)
             grid = FindFirstObjectByType<OfficeGrid2D>();
 
+        initialPosition = transform.position;
+
         if (string.IsNullOrEmpty(AgentType))
             inferredAgentType = presentation.InferAgentType();
 
@@ -318,6 +382,9 @@ public class AIWorkerAgent : MonoBehaviour
 
     private void Update()
     {
+        if (WorldSimulationPanel.IsPaused)
+            return;
+
         effects.TickNeeds(Time.deltaTime);
         TickEmotion();
 
@@ -463,6 +530,37 @@ public class AIWorkerAgent : MonoBehaviour
 
         // Hand props belong to live interactions and must not survive a restart.
         presentation?.ClearHeldItem();
+    }
+
+    public void ResetToFreshWorldState()
+    {
+        StopAllCoroutines();
+        InterruptCurrentAction();
+        conversation?.ForceStopConversation();
+        nearbyConversationCaller = null;
+        nearbyConversationReservationUntil = -1f;
+        ClearInvitation();
+        plannedActivities.Clear();
+        activeSequenceId = "";
+        activeSequenceObjective = "";
+        eavesdroppingConversation = null;
+        energy = 70f;
+        focus = 70f;
+        social = 70f;
+        productivity = 0f;
+        lastActionLabel = "";
+        effects?.ResetEffects();
+        presentation?.ClearHeldItem();
+        if (rb != null)
+            rb.position = (Vector2)initialPosition;
+        else
+            transform.position = initialPosition;
+        motor?.Stop();
+        navigation?.Clear();
+        crowd?.ClearDestination(this);
+        state = WorkerState.Thinking;
+        stateTimer = 0f;
+        ResetMovementLiveness();
     }
 
     public void FaceToward(Vector2 worldPosition)
@@ -1134,30 +1232,24 @@ public class AIWorkerAgent : MonoBehaviour
     {
         if (string.IsNullOrWhiteSpace(sequenceId))
             return false;
-        if (currentActivity != null && string.Equals(
-                currentActivity.sequenceId, sequenceId,
-                System.StringComparison.OrdinalIgnoreCase))
-            return true;
-        foreach (OfficeActivityPlan queued in plannedActivities)
-            if (queued != null && string.Equals(queued.sequenceId, sequenceId,
-                    System.StringComparison.OrdinalIgnoreCase))
-                return true;
-        return false;
+        return HasSequenceMatch(id => string.Equals(id, sequenceId,
+            System.StringComparison.OrdinalIgnoreCase));
     }
 
     public bool HasSequenceWithPrefix(string prefix)
     {
         if (string.IsNullOrWhiteSpace(prefix))
             return false;
-        if (currentActivity != null
-            && !string.IsNullOrWhiteSpace(currentActivity.sequenceId)
-            && currentActivity.sequenceId.StartsWith(prefix,
-                System.StringComparison.OrdinalIgnoreCase))
+        return HasSequenceMatch(id => !string.IsNullOrWhiteSpace(id)
+            && id.StartsWith(prefix, System.StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool HasSequenceMatch(System.Func<string, bool> match)
+    {
+        if (currentActivity != null && match(currentActivity.sequenceId))
             return true;
         foreach (OfficeActivityPlan queued in plannedActivities)
-            if (queued != null && !string.IsNullOrWhiteSpace(queued.sequenceId)
-                && queued.sequenceId.StartsWith(prefix,
-                    System.StringComparison.OrdinalIgnoreCase))
+            if (queued != null && match(queued.sequenceId))
                 return true;
         return false;
     }
@@ -1237,12 +1329,23 @@ public class AIWorkerAgent : MonoBehaviour
 
     private OfficeActionPoint PickUtilityAction()
     {
+        return PickBestAction(_ => true);
+    }
+
+    private OfficeActionPoint PickBestActionOfType(OfficeActionType actionType)
+    {
+        return PickBestAction(actionPoint =>
+            actionPoint.actionType == actionType && actionPoint.isActiveAndEnabled);
+    }
+
+    private OfficeActionPoint PickBestAction(System.Func<OfficeActionPoint, bool> eligible)
+    {
         OfficeActionPoint bestAction = null;
         float bestScore = float.MinValue;
 
         foreach (OfficeActionPoint actionPoint in actionPoints)
         {
-            if (actionPoint == null)
+            if (actionPoint == null || !eligible(actionPoint))
                 continue;
 
             if (actionPoint.actionType == OfficeActionType.WorkDesk &&
@@ -1371,31 +1474,6 @@ public class AIWorkerAgent : MonoBehaviour
 
         destination = GetPosition();
         return false;
-    }
-
-    private OfficeActionPoint PickBestActionOfType(OfficeActionType actionType)
-    {
-        OfficeActionPoint bestAction = null;
-        float bestScore = float.MinValue;
-        foreach (OfficeActionPoint actionPoint in actionPoints)
-        {
-            if (actionPoint == null || !actionPoint.isActiveAndEnabled
-                || actionPoint.actionType != actionType)
-                continue;
-            if (actionPoint.actionType == OfficeActionType.WorkDesk &&
-                assignedDesk != null && actionPoint != assignedDesk)
-                continue;
-            if (actionPoint.IsReservedByOther(this))
-                continue;
-
-            float score = ScoreAction(actionPoint) - EstimateRoutePenalty(actionPoint);
-            if (score > bestScore)
-            {
-                bestScore = score;
-                bestAction = actionPoint;
-            }
-        }
-        return bestAction;
     }
 
     private void RegisterBrainProfile()
@@ -1737,7 +1815,7 @@ public class AIWorkerAgent : MonoBehaviour
             : Mathf.Min(stateTimer, Mathf.Max(1f, lingerSeconds));
     }
 
-    public void CompleteConversationActivity(bool succeeded)
+    public void CompleteConversationActivity()
     {
         if (state != WorkerState.Acting || currentActivity == null)
             return;
@@ -1752,7 +1830,6 @@ public class AIWorkerAgent : MonoBehaviour
 
         nearbyConversationCaller = null;
         nearbyConversationReservationUntil = -1f;
-        currentActivity.interactionSucceeded = succeeded;
         FinishAction();
     }
 
@@ -1877,8 +1954,7 @@ public class AIWorkerAgent : MonoBehaviour
             activity.interactionAttempted = true;
             presentation.SetFacing(
                 activity.targetAgent.GetPosition() - GetPosition());
-            activity.interactionSucceeded =
-                GiveHeldItemTo(activity.targetAgent);
+            GiveHeldItemTo(activity.targetAgent);
             stateTimer = Mathf.Min(stateTimer, 0.75f);
             return true;
         }
@@ -1908,11 +1984,10 @@ public class AIWorkerAgent : MonoBehaviour
             target, opening, topic, activity.preparedScript,
             activity.routineConversationReserved,
             activity.onConversationStarted);
-        activity.interactionSucceeded = started;
         if (!started)
         {
             target.EndPausedConversationWith(this);
-            CompleteConversationActivity(false);
+            CompleteConversationActivity();
         }
     }
 
@@ -2152,6 +2227,7 @@ public class AIWorkerAgent : MonoBehaviour
 
     private float ScoreAction(OfficeActionPoint actionPoint)
     {
+        AIScoringTuning t = scoringTuning != null ? scoringTuning : new AIScoringTuning();
         float score = actionPoint.baseScore;
         if (profile != null)
             score += profile.GetActionPreference(actionPoint.actionType);
@@ -2166,101 +2242,102 @@ public class AIWorkerAgent : MonoBehaviour
         float focusUrgency = Mathf.Pow(1f - nFocus, 2);
         float socialUrgency = Mathf.Pow(1f - nSocial, 2);
 
-        if (actionPoint.energyChange > 0f) score += actionPoint.energyChange * energyUrgency * 3f;
-        if (actionPoint.focusChange > 0f) score += actionPoint.focusChange * focusUrgency * 3f;
+        if (actionPoint.energyChange > 0f) score += actionPoint.energyChange * energyUrgency * t.energyUrgencyGain;
+        if (actionPoint.focusChange > 0f) score += actionPoint.focusChange * focusUrgency * t.focusUrgencyGain;
         if (actionPoint.socialChange > 0f)
-            score += actionPoint.socialChange * socialUrgency * 2.4f;
+            score += actionPoint.socialChange * socialUrgency * t.socialUrgencyGain;
 
         if (AgentConversationController.IsRoutineSocialSpot(actionPoint.actionType))
         {
-            if (social < 60f)
-                score += (60f - social) * 0.65f;
-            if (social < 35f)
-                score += 18f;
-            if (social > 75f)
-                score -= (social - 75f) * 0.3f;
+            if (social < t.socialTarget)
+                score += (t.socialTarget - social) * t.socialGradient;
+            if (social < t.socialCritical)
+                score += t.socialCriticalBonus;
+            if (social > t.socialSaturation)
+                score -= (social - t.socialSaturation) * t.socialSaturationPenalty;
             if (conversation != null && conversation.IsSociallyCoolingDown)
-                score -= 40f;
+                score -= t.socialCooldownPenalty;
         }
 
         if (actionPoint.CurrentUsers > 0 && actionPoint.actionType == OfficeActionType.ChatSpot)
-            score += social < 35f ? 8f : 2f;
+            score += social < t.socialCritical ? t.chatSpotLowSocialBonus : t.chatSpotNormalBonus;
 
         if (actionPoint.actionType == OfficeActionType.VendingMachine)
         {
             float snackNeed = Mathf.Clamp01((100f - energy) / 100f);
-            score += 6f + snackNeed * 12f;
+            score += t.vendingBaseBonus + snackNeed * t.vendingSnackScale;
             if (presentation != null && presentation.IsHolding)
-                score -= 12f;
+                score -= t.vendingHoldingPenalty;
         }
 
         if (actionPoint.actionType == OfficeActionType.CoffeeMachine)
         {
             float coffeeNeed = Mathf.Clamp01((100f - energy) / 100f);
-            score += 8f + coffeeNeed * 14f;
+            score += t.coffeeBaseBonus + coffeeNeed * t.coffeeNeedScale;
             if (presentation != null && presentation.IsHolding)
-                score -= 10f;
+                score -= t.coffeeHoldingPenalty;
         }
 
         if (actionPoint.actionType == OfficeActionType.WorkDesk)
         {
             float avgSatisfaction = (nEnergy + nFocus + nSocial) / 3f;
-            score += avgSatisfaction * 40f;
+            score += avgSatisfaction * t.deskSatisfactionScale;
 
-            if (energy < 25f) score -= 100f;
-            if (focus < 25f) score -= 100f;
-            if (social < 15f) score -= 50f;
+            if (energy < t.deskLowEnergyThreshold) score -= t.deskLowEnergyPenalty;
+            if (focus < t.deskLowFocusThreshold) score -= t.deskLowFocusPenalty;
+            if (social < t.deskLowSocialThreshold) score -= t.deskLowSocialPenalty;
             if (stillSeated && actionPoint == lastFinishedDesk)
-                score -= 90f;
+                score -= t.deskRevisitPenalty;
         }
 
         if (lastFinishedActionType.HasValue
             && lastFinishedActionType.Value == actionPoint.actionType)
-            score -= actionPoint.actionType == OfficeActionType.WorkDesk ? 45f : 20f;
+            score -= actionPoint.actionType == OfficeActionType.WorkDesk ? t.repeatDeskPenalty : t.repeatOtherPenalty;
 
         if (actionPoint.actionType == OfficeActionType.PlantCare)
         {
-            score += 6f + energyUrgency * 10f + socialUrgency * 5f;
+            score += t.plantBaseBonus + energyUrgency * t.plantEnergyScale + socialUrgency * t.plantSocialScale;
             if (actionPoint.CurrentUsers > 0)
-                score -= 15f;
+                score -= t.plantOccupiedPenalty;
         }
 
         return score;
     }
 
-    private static float ScoreScheduleFit(OfficeActionType actionType)
+    private float ScoreScheduleFit(OfficeActionType actionType)
     {
         LLMBrainService brain = LLMBrainService.Instance;
         if (brain == null)
             return 0f;
 
+        AIScoringTuning t = scoringTuning != null ? scoringTuning : new AIScoringTuning();
         switch (brain.SchedulePhase)
         {
             case WorldSchedulePhase.Morning:
-                if (actionType == OfficeActionType.CoffeeMachine) return 22f;
-                if (actionType == OfficeActionType.WorkDesk) return 10f;
+                if (actionType == OfficeActionType.CoffeeMachine) return t.morningCoffeeFit;
+                if (actionType == OfficeActionType.WorkDesk) return t.morningDeskFit;
                 break;
             case WorldSchedulePhase.Work:
             case WorldSchedulePhase.Afternoon:
-                if (actionType == OfficeActionType.WorkDesk) return 24f;
+                if (actionType == OfficeActionType.WorkDesk) return t.workDeskFit;
                 if (actionType == OfficeActionType.Whiteboard
-                    || actionType == OfficeActionType.Printer) return 12f;
+                    || actionType == OfficeActionType.Printer) return t.collaborationFit;
                 break;
             case WorldSchedulePhase.Lunch:
                 if (actionType == OfficeActionType.BreakSpot
-                    || actionType == OfficeActionType.VendingMachine) return 30f;
-                if (actionType == OfficeActionType.WorkDesk) return -28f;
+                    || actionType == OfficeActionType.VendingMachine) return t.lunchBreakFit;
+                if (actionType == OfficeActionType.WorkDesk) return t.lunchDeskFit;
                 break;
             case WorldSchedulePhase.Evening:
                 if (actionType == OfficeActionType.BreakSpot
-                    || actionType == OfficeActionType.ChatSpot) return 18f;
-                if (actionType == OfficeActionType.WorkDesk) return -12f;
+                    || actionType == OfficeActionType.ChatSpot) return t.eveningBreakFit;
+                if (actionType == OfficeActionType.WorkDesk) return t.eveningDeskFit;
                 break;
             case WorldSchedulePhase.Night:
                 if (actionType == OfficeActionType.Think
                     || actionType == OfficeActionType.WalkAround
-                    || actionType == OfficeActionType.BreakSpot) return 22f;
-                if (actionType == OfficeActionType.WorkDesk) return -45f;
+                    || actionType == OfficeActionType.BreakSpot) return t.nightBreakFit;
+                if (actionType == OfficeActionType.WorkDesk) return t.nightDeskFit;
                 break;
         }
         return 0f;

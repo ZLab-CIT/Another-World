@@ -31,23 +31,11 @@ public sealed class VendingEventCatalog
             TryAdd(evt);
     }
 
-    public VendingEventSO FindByEventId(string eventId)
-    {
-        return !string.IsNullOrWhiteSpace(eventId) && byEventId.TryGetValue(eventId, out VendingEventSO evt)
-            ? evt
-            : null;
-    }
-
     public VendingEventSO FindByProductId(string productId)
     {
         return !string.IsNullOrWhiteSpace(productId) && byProductId.TryGetValue(productId, out VendingEventSO evt)
             ? evt
             : null;
-    }
-
-    public VendingEventSO FindFirst(Predicate<VendingEventSO> predicate)
-    {
-        return predicate == null ? null : events.Find(predicate);
     }
 
     public VendingEventSO PickWeighted(Predicate<VendingEventSO> predicate, Func<VendingEventSO, float> getWeight)

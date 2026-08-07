@@ -52,6 +52,16 @@ public class AgentEffects : MonoBehaviour
         decayOverrideUntil = Time.time + duration;
     }
 
+    public void ResetEffects()
+    {
+        speedMultiplier = 1f;
+        speedUntil = -1f;
+        energyDecayMultiplier = 1f;
+        focusDecayMultiplier = 1f;
+        socialDecayMultiplier = 1f;
+        decayOverrideUntil = -1f;
+    }
+
     public void CaptureState(PersistedAgentRuntimeState state)
     {
         if (state == null)

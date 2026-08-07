@@ -222,6 +222,21 @@ public static class WorldStateStore
         return result;
     }
 
+    public static void Delete()
+    {
+        try
+        {
+            string path = GetPath();
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning(nameof(WorldStateStore) +
+                " could not delete saved state: " + exception.Message);
+        }
+    }
+
     private static string GetPath()
     {
         return Path.Combine(Application.persistentDataPath, FileName);

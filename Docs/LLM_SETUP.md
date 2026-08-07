@@ -18,6 +18,25 @@ The script stores the values in the Windows user environment, never in this
 repository. Exit and reopen Unity after changing keys so an older key inherited
 by the Editor process cannot take precedence.
 
+## Entering a key at runtime (private deployed builds)
+
+A browser or a bare Windows player may have no environment variables to configure.
+Hover the **WORLD CONTROL** corner panel in the game, paste a Groq or Gemini
+key into the `LLM API KEY` field, and press **Apply**. The key is kept in
+memory for the current process and takes precedence over the environment
+variable. It is cleared when the player reloads or exits and is not written to
+`PlayerPrefs`. Use **Test** to verify the connection. **Stop** freezes
+the simulation, **Start** resumes it, and **Restart world** wipes the save and
+returns every worker to a fresh day one.
+
+Do not use this runtime key field for a public WebGL deployment. Browser users
+can inspect outbound requests and recover the key. See `Docs/DEPLOYMENT.md` for
+the required server-side proxy boundary.
+
+If no key is reachable by either path at startup, the runtime logs
+`[LLMBrainService] API key is empty` and the director shows a panel hint until
+a key is applied.
+
 No hosted API is unlimited. Using both providers distributes requests and
 provides failover, but keys on the same provider account can still share one
 quota. The runtime minimizes usage by generating ten reusable beats per episode

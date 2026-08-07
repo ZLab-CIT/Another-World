@@ -87,54 +87,10 @@ public static class TextUtils
         return start >= 0 && end > start ? value.Substring(start, end - start + 1) : null;
     }
 
-    public static int CountOccurrences(string value, string fragment)
-    {
-        if (string.IsNullOrEmpty(value) || string.IsNullOrEmpty(fragment))
-            return 0;
-        int count = 0;
-        int index = 0;
-        while ((index = value.IndexOf(fragment, index, StringComparison.Ordinal)) >= 0)
-        {
-            count++;
-            index += fragment.Length;
-        }
-        return count;
-    }
-
     public static bool ContainsIgnoreCase(string value, string fragment)
     {
         return !string.IsNullOrWhiteSpace(value) && !string.IsNullOrWhiteSpace(fragment)
             && value.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0;
-    }
-
-    public static bool ContainsUnavailableObjectClaim(string value)
-    {
-        string[] unavailable =
-        {
-            "gift", "present", "snack", "food", "cake", "dumpling"
-        };
-        foreach (string word in unavailable)
-            if (ContainsIgnoreCase(value, word))
-                return true;
-        return false;
-    }
-
-    public static bool ClaimsUnavailableObjectHandling(string value)
-    {
-        if (!ContainsUnavailableObjectClaim(value))
-            return false;
-
-        string normalized = " " + NormalizeForComparison(value) + " ";
-        string[] handlingPhrases =
-        {
-            " get ", " fetch ", " bring ", " carry ", " give ", " hand ",
-            " deliver ", " buy ", " grab ", " pick up ", " serve ", " share ",
-            " hold ", " receive ", " eat "
-        };
-        foreach (string phrase in handlingPhrases)
-            if (normalized.Contains(phrase))
-                return true;
-        return false;
     }
 
     public static ConversationParticipantContext FindParticipant(
@@ -210,53 +166,6 @@ public static class TextUtils
         return words >= 2 && words <= 18 ? value : null;
     }
 
-    public static string CleanReply(string raw, string speakerName, string participants,
-        out string rejectionReason)
-    {
-        rejectionReason = null;
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            rejectionReason = "empty response";
-            return null;
-        }
-
-        string s = raw.Trim().Trim('"', '\'', '\u201c', '\u201d', '\u2018', '\u2019').Trim();
-
-        if (string.IsNullOrWhiteSpace(s))
-        {
-            rejectionReason = "empty after trimming quotes";
-            return null;
-        }
-
-        s = StripSpeakerLabels(s, speakerName, participants);
-        if (string.IsNullOrWhiteSpace(s))
-            return null;
-
-        s = StripReplyLabel(s);
-        if (string.IsNullOrWhiteSpace(s))
-            return null;
-
-        s = RemoveGenericAgreementOpening(s);
-        if (string.IsNullOrWhiteSpace(s))
-        {
-            rejectionReason = "only a generic agreement opener";
-            return null;
-        }
-
-        string mutableRef = s;
-        if (IsAssistantStyleReply(s) || IsNarratedReply(ref mutableRef, speakerName, participants))
-        {
-            s = mutableRef;
-            rejectionReason = string.IsNullOrWhiteSpace(s)
-                ? "only a generic agreement opener"
-                : "assistant-style or narrated response";
-            return null;
-        }
-        s = mutableRef;
-
-        return KeepCompleteThought(s, out rejectionReason);
-    }
-
     public static string StripSpeakerLabels(string line, string speakerName, string participants)
     {
         if (string.IsNullOrWhiteSpace(line))
@@ -323,44 +232,6 @@ public static class TextUtils
                 return line.Trim();
 
         return line.Substring(colon + 1).Trim();
-    }
-
-    public static string RemoveGenericAgreementOpening(string line)
-    {
-        if (string.IsNullOrWhiteSpace(line))
-            return null;
-
-        string value = line.Trim();
-        string lower = value.ToLowerInvariant();
-        string[] genericOpeners =
-        {
-            "absolutely", "exactly", "definitely", "great idea", "you're right", "you are right",
-            "i agree", "i completely agree", "i totally agree", "i understand", "of course",
-            "that's great", "that sounds great", "sounds great", "thank you", "thanks"
-        };
-
-        bool matches = false;
-        foreach (string opener in genericOpeners)
-        {
-            if (!lower.StartsWith(opener, StringComparison.Ordinal))
-                continue;
-
-            matches = true;
-            break;
-        }
-
-        if (!matches)
-            return value;
-
-        int sentenceEnd = value.IndexOfAny(new[] { '.', '!', '?' });
-        if (sentenceEnd >= 0 && sentenceEnd + 1 < value.Length)
-            return value.Substring(sentenceEnd + 1).Trim();
-
-        int separator = value.IndexOfAny(new[] { ',', ';', ':' });
-        if (separator >= 0 && separator + 1 < value.Length)
-            return value.Substring(separator + 1).Trim();
-
-        return null;
     }
 
     public static string KeepCompleteThought(string line, out string rejectionReason)
@@ -490,21 +361,6 @@ public static class TextUtils
         return true;
     }
 
-    public static bool IsGenericTopic(string topic)
-    {
-        string value = NormalizeForComparison(topic);
-        string[] generic =
-        {
-            "office conversation", "casual conversation", "general conversation",
-            "daily life", "work life", "catching up", "how the day is going",
-            "talking with coworkers", "friendly chat"
-        };
-        foreach (string phrase in generic)
-            if (value == phrase || value.Contains(phrase))
-                return true;
-        return false;
-    }
-
     public static bool IsGenericOpening(string opening)
     {
         string value = NormalizeForComparison(opening);
@@ -521,50 +377,6 @@ public static class TextUtils
         return false;
     }
 
-    public static bool LooksLikePersonName(string topic, List<ConversationParticipantContext> coworkers)
-    {
-        string value = NormalizeForComparison(topic);
-        if (string.IsNullOrWhiteSpace(value))
-            return false;
-
-        string[] words = value.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length == 1 && IsNameLikeToken(words[0]))
-            return true;
-
-        if (coworkers != null)
-        {
-            foreach (ConversationParticipantContext coworker in coworkers)
-            {
-                if (coworker == null || string.IsNullOrWhiteSpace(coworker.displayName))
-                    continue;
-                if (value == NormalizeForComparison(coworker.displayName))
-                    return true;
-            }
-        }
-
-        return false;
-    }
-
-    public static bool IsNameLikeToken(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value) || value.Length < 3 || value.Length > 20)
-            return false;
-
-        foreach (char c in value)
-        {
-            if (!char.IsLetter(c) && c != '\'' && c != '-')
-                return false;
-        }
-
-        return true;
-    }
-
-    public static string DisplayName(AgentProfile profile, string fallback)
-    {
-        return profile != null && !string.IsNullOrWhiteSpace(profile.displayName)
-            ? profile.displayName : fallback;
-    }
-
     public static string JoinParticipantNames(List<ConversationParticipantContext> participants)
     {
         StringBuilder result = new();
@@ -577,30 +389,6 @@ public static class TextUtils
             if (result.Length > 0)
                 result.Append(", ");
             result.Append(participant.displayName.Trim());
-        }
-        return result.ToString();
-    }
-
-    public static string JoinActionTypes(List<OfficeActionType> actions)
-    {
-        StringBuilder result = new();
-        foreach (OfficeActionType action in actions)
-        {
-            if (result.Length > 0)
-                result.Append(", ");
-            result.Append(action);
-        }
-        return result.ToString();
-    }
-
-    public static string BuildReplyKeyList(int count)
-    {
-        StringBuilder result = new();
-        for (int i = 0; i < count; i++)
-        {
-            if (result.Length > 0)
-                result.Append(", ");
-            result.Append("reply").Append(i + 1);
         }
         return result.ToString();
     }

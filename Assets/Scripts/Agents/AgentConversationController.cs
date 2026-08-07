@@ -35,7 +35,6 @@ private float nextSocialCheckTime;
             return activeConversationOwners.Count;
         }
     }
-    public static bool IsAnyConversationActive => ActiveConversationCount > 0;
     public static bool HasConversationCapacity =>
         ActiveConversationCount < MaximumConcurrentConversations;
 
@@ -64,6 +63,22 @@ private float nextSocialCheckTime;
     {
         nextSocialCheckTime = Time.time + 0.5f;
         TryStart(action);
+    }
+
+    public void ForceStopConversation()
+    {
+        activeConversationOwners.Remove(this);
+        if (ownedConversationAction != null)
+            activeConversationActions.Remove(ownedConversationAction);
+        ownedConversationAction = null;
+        inConversation = false;
+        nextSocialCheckTime = 0f;
+        if (!string.IsNullOrEmpty(conversationHearingId))
+        {
+            OfficeConversationHearingTracker.End(conversationHearingId);
+            conversationHearingId = null;
+        }
+        affinity.Clear();
     }
 
     public void Tick(OfficeActionPoint action)
@@ -474,7 +489,7 @@ List<AIWorkerAgent> speakers = new() { owner };
             }
             SetConversationCooldown(speakers, 2.5f);
             EndConversation(participants);
-            ReleaseAfterConversation(speakers, conversationSpoken);
+            ReleaseAfterConversation(speakers);
             if (action != null)
                 activeConversationActions.Remove(action);
             ownedConversationAction = null;
@@ -1011,8 +1026,7 @@ brain.Remember(listener.AgentId, "Talked with " + others + " about " + topic.Tri
             GetController(speaker)?.SetCooldown(seconds);
     }
 
-    private static void ReleaseAfterConversation(List<AIWorkerAgent> speakers,
-        bool conversationSucceeded)
+    private static void ReleaseAfterConversation(List<AIWorkerAgent> speakers)
     {
         if (speakers == null)
             return;
@@ -1029,7 +1043,7 @@ brain.Remember(listener.AgentId, "Talked with " + others + " about " + topic.Tri
             float linger = leaveSoon
                 ? UnityEngine.Random.Range(0.3f, 1.2f)
                 : UnityEngine.Random.Range(4f, 8f);
-            speaker.CompleteConversationActivity(conversationSucceeded);
+            speaker.CompleteConversationActivity();
             speaker.EndSocialConversation(leaveSoon, linger);
         }
     }

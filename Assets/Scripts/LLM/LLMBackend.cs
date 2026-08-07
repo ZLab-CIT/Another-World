@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+#endif
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -60,7 +62,9 @@ public class OpenAICompatibleBackend : ILLMBackend
         public UnityWebRequest.Result result;
     }
 
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
     private static readonly HttpClient desktopHttpClient = CreateDesktopHttpClient();
+#endif
     private readonly string baseUrl;
     private readonly string apiKey;
     private readonly string model;
@@ -75,6 +79,7 @@ public class OpenAICompatibleBackend : ILLMBackend
         this.model = model ?? "";
     }
 
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
     private static HttpClient CreateDesktopHttpClient()
     {
         IWebProxy systemProxy = WebRequest.GetSystemWebProxy();
@@ -90,6 +95,7 @@ public class OpenAICompatibleBackend : ILLMBackend
         };
         return new HttpClient(handler, true);
     }
+#endif
 
     public async Task<string> CompleteAsync(List<ChatMessage> messages, LLMOptions options = null)
     {
@@ -191,6 +197,16 @@ public class OpenAICompatibleBackend : ILLMBackend
                 bool retryable = jsonValidationFailure
                     || !timedOut && !certificateFailure && !permissionFailure
                     && IsRetryable(responseCode, result);
+                if (jsonValidationFailure && attempt + 1 < maxAttempts)
+                {
+                    // Some OpenAI-compatible providers intermittently reject
+                    // response_format even when the prompt can still return JSON.
+                    json = json.Replace(
+                        ",\"response_format\":{\"type\":\"json_object\"}", "");
+                    Debug.Log(logPrefix
+                        + "strict JSON mode was rejected; retrying with prompt-enforced JSON.");
+                    continue;
+                }
                 if (retryable && attempt + 1 < maxAttempts)
                 {
                     float delaySeconds = GetRetryDelaySeconds(
@@ -292,6 +308,7 @@ public class OpenAICompatibleBackend : ILLMBackend
 #endif
     }
 
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
     private async Task<TransportResponse> SendWithDesktopHttpAsync(
         string json, LLMOptions options)
     {
@@ -366,6 +383,7 @@ public class OpenAICompatibleBackend : ILLMBackend
             return string.Join(",", contentValues);
         return null;
     }
+#endif
 
     private async Task<TransportResponse> SendWithUnityWebRequestAsync(
         string json, LLMOptions options)
